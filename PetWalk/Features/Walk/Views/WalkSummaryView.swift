@@ -27,6 +27,10 @@ struct WalkSummaryView: View {
     // 动画
     @State private var isVisible = false
     
+    // 游戏化奖励状态
+    @State private var earnedBones: Int = 0
+    @State private var foundItems: [TreasureItem] = []
+    
     var body: some View {
         ZStack {
             Color.appBackground.ignoresSafeArea()
@@ -45,6 +49,50 @@ struct WalkSummaryView: View {
                         StatBox(title: "时长", value: formatDuration(duration), unit: "min")
                     }
                     .padding(.horizontal)
+                    
+                    // 2.5 奖励展示区 (Gamification)
+                    VStack(spacing: 15) {
+                        Text("本次收获")
+                            .font(.headline)
+                            .foregroundColor(.appBrown)
+                        
+                        HStack(spacing: 30) {
+                            // 骨头币
+                            VStack {
+                                Image(systemName: "bone.fill")
+                                    .font(.title)
+                                    .foregroundColor(.yellow)
+                                Text("+\(earnedBones)")
+                                    .font(.title2)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.appBrown)
+                            }
+                            
+                            // 掉落物
+                            if foundItems.isEmpty {
+                                Text("这次没有捡到东西呢...")
+                                    .font(.caption)
+                                    .foregroundColor(.gray)
+                            } else {
+                                ForEach(foundItems) { item in
+                                    VStack {
+                                        Image(systemName: item.iconName)
+                                            .font(.title)
+                                            .foregroundColor(item.rarity.color)
+                                        Text(item.name)
+                                            .font(.caption)
+                                            .foregroundColor(.appBrown)
+                                    }
+                                }
+                            }
+                        }
+                        .padding()
+                        .background(Color.white)
+                        .cornerRadius(15)
+                        .shadow(color: .black.opacity(0.05), radius: 5)
+                    }
+                    .padding(.horizontal)
+                    .transition(.scale)
                     
                     // 3. 心情选择
                     VStack(alignment: .leading, spacing: 15) {
@@ -120,10 +168,30 @@ struct WalkSummaryView: View {
                 }
             }
         }
+        .onAppear {
+            // 计算奖励
+            let bones = GameSystem.shared.calculateBones(distanceKm: distance)
+            let items = GameSystem.shared.generateDrops(distanceKm: distance)
+            
+            // 简单动画延迟显示
+            withAnimation(.spring().delay(0.5)) {
+                self.earnedBones = bones
+                self.foundItems = items
+            }
+        }
     }
     
     // 保存逻辑
     private func saveRecord() {
+        // 更新 UserData (累加骨头币和物品)
+        var currentUserData = dataManager.userData
+        currentUserData.totalBones += earnedBones
+        for item in foundItems {
+            currentUserData.inventory[item.id, default: 0] += 1
+        }
+        currentUserData.lastWalkDate = Date()
+        dataManager.updateUserData(currentUserData)
+        
         // 1. 保存图片到本地
         var imageName: String?
         if let image = selectedImage {
@@ -152,7 +220,9 @@ struct WalkSummaryView: View {
             duration: Int(duration / 60),
             mood: mood,
             imageName: imageName,
-            route: routeCoordinates // 保存轨迹
+            route: routeCoordinates, // 保存轨迹
+            itemsFound: foundItems.map { $0.id }, // 保存物品ID
+            bonesEarned: earnedBones // 保存骨头币
         )
         
         // 3. 存入 DataManager

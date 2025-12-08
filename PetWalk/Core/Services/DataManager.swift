@@ -14,18 +14,54 @@ class DataManager: ObservableObject {
     
     // 发布给 UI 的数据源
     @Published var records: [WalkRecord] = []
+    @Published var userData: UserData = UserData.initial
     
     // 文件保存的名字
     private let fileName = "walk_history.json"
+    private let userDataFileName = "user_data.json"
     
     init() {
         loadData()
+        loadUserData()
+    }
+    
+    // MARK: - UserData 管理
+    func updateUserData(_ newData: UserData) {
+        self.userData = newData
+        saveUserData()
+    }
+    
+    func saveUserData() {
+        do {
+            let url = getDocumentsDirectory().appendingPathComponent(userDataFileName)
+            let data = try JSONEncoder().encode(userData)
+            try data.write(to: url, options: [.atomic, .completeFileProtection])
+            print("💾 用户数据保存成功！")
+        } catch {
+            print("❌ 用户数据保存失败: \(error)")
+        }
+    }
+    
+    func loadUserData() {
+        let url = getDocumentsDirectory().appendingPathComponent(userDataFileName)
+        do {
+            let data = try Data(contentsOf: url)
+            self.userData = try JSONDecoder().decode(UserData.self, from: data)
+            print("📂 读取到用户数据: 骨头币 \(userData.totalBones)")
+        } catch {
+            print("⚠️ 还没有用户数据，使用默认初始值")
+            self.userData = UserData.initial
+        }
     }
     
     // MARK: - 核心功能：保存数据
     func addRecord(_ record: WalkRecord) {
         records.insert(record, at: 0) // 把最新的插到最前面
         saveData()
+        
+        // 更新最后遛狗时间
+        userData.lastWalkDate = Date()
+        saveUserData()
     }
     
     func saveData() {
@@ -58,19 +94,19 @@ class DataManager: ObservableObject {
             // 如果没数据，我们给几个假数据测试一下 (上线前记得删掉)
             self.records = [
                 // 12月1日 (3次, 总计 ~4.5km)
-                WalkRecord(day: 1, date: "12月1日", time: "07:30", distance: 1.5, duration: 20, mood: "happy", imageName: nil, route: nil),
-                WalkRecord(day: 1, date: "12月1日", time: "12:15", distance: 1.0, duration: 15, mood: "normal", imageName: nil, route: nil),
-                WalkRecord(day: 1, date: "12月1日", time: "19:00", distance: 2.0, duration: 30, mood: "tired", imageName: "dog_cutout", route: nil),
+                WalkRecord(day: 1, date: "12月1日", time: "07:30", distance: 1.5, duration: 20, mood: "happy", imageName: nil, route: nil, itemsFound: nil, bonesEarned: nil),
+                WalkRecord(day: 1, date: "12月1日", time: "12:15", distance: 1.0, duration: 15, mood: "normal", imageName: nil, route: nil, itemsFound: nil, bonesEarned: nil),
+                WalkRecord(day: 1, date: "12月1日", time: "19:00", distance: 2.0, duration: 30, mood: "tired", imageName: "dog_cutout", route: nil, itemsFound: nil, bonesEarned: nil),
                 
                 // 12月2日 (1次, 1.2km)
-                WalkRecord(day: 2, date: "12月2日", time: "18:45", distance: 1.2, duration: 18, mood: "happy", imageName: nil, route: nil),
+                WalkRecord(day: 2, date: "12月2日", time: "18:45", distance: 1.2, duration: 18, mood: "happy", imageName: nil, route: nil, itemsFound: nil, bonesEarned: nil),
                 
                 // 12月3日 (2次, 总计 3.0km)
-                WalkRecord(day: 3, date: "12月3日", time: "08:00", distance: 1.5, duration: 25, mood: "normal", imageName: nil, route: nil),
-                WalkRecord(day: 3, date: "12月3日", time: "20:30", distance: 1.5, duration: 25, mood: "happy", imageName: nil, route: nil),
+                WalkRecord(day: 3, date: "12月3日", time: "08:00", distance: 1.5, duration: 25, mood: "normal", imageName: nil, route: nil, itemsFound: nil, bonesEarned: nil),
+                WalkRecord(day: 3, date: "12月3日", time: "20:30", distance: 1.5, duration: 25, mood: "happy", imageName: nil, route: nil, itemsFound: nil, bonesEarned: nil),
                 
                 // 12月4日 (1次, 0.5km)
-                WalkRecord(day: 4, date: "12月4日", time: "21:00", distance: 0.5, duration: 8, mood: "tired", imageName: nil, route: nil)
+                WalkRecord(day: 4, date: "12月4日", time: "21:00", distance: 0.5, duration: 8, mood: "tired", imageName: nil, route: nil, itemsFound: nil, bonesEarned: nil)
             ]
         }
     }

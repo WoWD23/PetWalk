@@ -26,16 +26,7 @@ struct MainTabView: View {
                 case .history:
                     HistoryView()
                 case .dress:
-                    // 暂时用占位图
-                    VStack {
-                        Image(systemName: "tshirt.fill")
-                            .font(.system(size: 60))
-                            .foregroundColor(.appGreenMain)
-                        Text("装扮功能开发中...")
-                            .padding()
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.appBackground)
+                    InventoryView()
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)

@@ -24,6 +24,10 @@ struct WalkRecord: Identifiable, Codable {
     let mood: String
     let imageName: String?
     
-    // 新增：轨迹数据
+    // 轨迹数据
     let route: [RoutePoint]?
+    
+    // Gamification (v1.1)
+    var itemsFound: [String]? // 存储 TreasureItem 的 ID
+    var bonesEarned: Int?     // 本次获得的骨头币
 }

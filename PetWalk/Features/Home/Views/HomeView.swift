@@ -17,14 +17,36 @@ struct HomeView: View {
     // 引入遛狗会话管理器 (单次数据)
     @StateObject private var walkManager = WalkSessionManager()
     
+    // 引入数据管理器 (用于获取上次遛狗时间)
+    @ObservedObject private var dataManager = DataManager.shared
+    
     // 相册选择器的状态
     @State private var selectedItem: PhotosPickerItem?
     
     // 动画状态
     @State private var isDogVisible = false
+    @State private var isAnimating = false // 统一控制循环动画
+    
+    // 计算当前心情
+    var currentMood: PetMood {
+        PetStatusManager.shared.calculateMood(lastWalkDate: dataManager.userData.lastWalkDate)
+    }
     
     // 设定一个每日目标
     let dailyTarget: Double = 3.0
+    
+    // Debug 辅助函数
+    #if DEBUG
+    func updateMood(_ mood: PetMood) {
+        PetStatusManager.shared.debugUpdateMood(mood, dataManager: dataManager)
+        
+        // 更新跳动状态
+        isAnimating = false // 先重置
+        withAnimation {
+            isAnimating = true // 触发新动画
+        }
+    }
+    #endif
     
     // 是否显示结算页
     @State private var showSummary = false
@@ -72,10 +94,46 @@ struct HomeView: View {
     var idleModeView: some View {
         VStack(spacing: 0) {
             // Header
-            Text("PetWalk")
-                .font(.system(size: 34, weight: .heavy, design: .rounded))
-                .foregroundColor(.appBrown)
-                .padding(.top, 20)
+            HStack {
+                #if DEBUG
+                Menu {
+                    ForEach(PetMood.allCases, id: \.self) { mood in
+                        Button(mood.debugTitle) { updateMood(mood) }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("PetWalk")
+                            .font(.system(size: 34, weight: .heavy, design: .rounded))
+                            .foregroundColor(.appBrown)
+                        Image(systemName: "ladybug.fill") // Debug icon
+                            .font(.system(size: 12))
+                            .foregroundColor(.red.opacity(0.6))
+                    }
+                }
+                #else
+                Text("PetWalk")
+                    .font(.system(size: 34, weight: .heavy, design: .rounded))
+                    .foregroundColor(.appBrown)
+                #endif
+                
+                Spacer()
+                
+                // 骨头币显示
+                HStack(spacing: 5) {
+                    Text("🦴")
+                        .font(.title2)
+                    Text("\(dataManager.userData.totalBones)")
+                        .font(.system(size: 20, weight: .bold, design: .rounded))
+                        .foregroundColor(.appBrown)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(Color.white.opacity(0.8))
+                .clipShape(Capsule())
+                .shadow(color: .black.opacity(0.05), radius: 5)
+            }
+            .padding(.top, 20)
+            .padding(.horizontal, 20)
             
             Spacer()
             
@@ -112,6 +170,11 @@ struct HomeView: View {
                     .shadow(color: .white, radius: 0, x: 0, y: 2)
                     .shadow(color: .white, radius: 0, x: 0, y: -2)
                     .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 10)
+                    // 状态动画：兴奋/开心时跳动，期待时歪头，郁闷时压扁
+                    .rotationEffect(.degrees(currentMood.anim.rotationAngle))
+                    .scaleEffect(x: 1.0, y: currentMood.anim.scaleY)
+                    .offset(y: (isAnimating ? currentMood.anim.bounceHeight : 0) + currentMood.anim.offsetY)
+                    .animation(currentMood.anim.timing, value: isAnimating)
                     .scaleEffect(isDogVisible ? 1.0 : 0.8)
                     .opacity(isDogVisible ? 1.0 : 0)
                 }
@@ -119,16 +182,36 @@ struct HomeView: View {
                     viewModel.selectAndProcessImage(from: newItem)
                 }
                 
+                // 2.5 状态贴纸 (Overlay)
+                if let emoji = currentMood.overlay.emoji {
+                    let config = currentMood.overlay
+                    Text(emoji)
+                        .font(.system(size: 40))
+                        // 基础位置 + 动画位移
+                        .offset(x: config.offset.width,
+                                y: config.offset.height + (isAnimating ? config.offsetYTarget : 0))
+                        // 动画缩放
+                        .scaleEffect(isAnimating ? config.scaleTarget : 1.0)
+                        // 动画透明度 (叠加: isDogVisible控制显示, opacityTarget控制闪烁/渐隐)
+                        .opacity(isDogVisible ? (isAnimating ? config.opacityTarget : 1.0) : 0)
+                        .animation(config.animation, value: isAnimating)
+                        .id(currentMood) // 强制刷新
+                }
+                
                 // 3. 气泡 (最上层)
-                SpeechBubbleView(text: "今天天气不错，\n去公园吗？")
+                SpeechBubbleView(text: currentMood.dialogue.text)
                     .offset(x: 80, y: -140)
                     .opacity(isDogVisible ? 1 : 0)
                     .animation(.easeIn.delay(0.6), value: isDogVisible)
             }
             .onAppear {
+                // 入场动画 (只执行一次)
                 withAnimation(.spring(response: 0.6, dampingFraction: 0.5, blendDuration: 0)) {
                     isDogVisible = true
                 }
+                
+                // 启动状态动画
+                isAnimating = true
             }
             
             Spacer()
