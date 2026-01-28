@@ -57,6 +57,13 @@ struct HomeView: View {
             isAnimating = true // 触发新动画
         }
     }
+    
+    // 设置模拟天气（用于测试天气成就）
+    func setTestWeather(_ condition: WeatherCondition, temperature: Double) {
+        WeatherManager.shared.setMockWeather(condition: condition, temperature: temperature)
+        walkManager.currentWeather = WeatherManager.shared.currentWeather
+        print("🐛 Debug: 设置天气为 \(condition.displayName), \(Int(temperature))°C")
+    }
     #endif
     
     // 是否显示结算页
@@ -68,8 +75,14 @@ struct HomeView: View {
     // 是否显示头像编辑器
     @State private var showAvatarCreator = false
     
+    // 是否显示设置页
+    @State private var showSettings = false
+    
     // 遛狗开始时间（用于成就检测）
     @State private var walkStartTime: Date = Date()
+    
+    // 遛狗会话数据（用于传递给结算页）
+    @State private var walkSessionData: WalkSessionData?
     
     // 头像管理器
     @ObservedObject private var avatarManager = AvatarManager.shared
@@ -98,19 +111,19 @@ struct HomeView: View {
         }
         // 弹出结算页
         .sheet(isPresented: $showSummary) {
-            WalkSummaryView(
-                duration: walkManager.duration,
-                distance: walkManager.distance,
-                // 将 CoreLocation 坐标转换为我们的 Codable 结构体
-                routeCoordinates: walkManager.locationService.routeCoordinates.map { 
-                    RoutePoint(lat: $0.latitude, lon: $0.longitude) 
-                },
-                walkStartTime: walkStartTime,  // 传入遛狗开始时间
-                onFinish: {
-                    showSummary = false
-                    // 可以在这里重置 walkManager 的数据，如果需要的话
-                }
-            )
+            if let sessionData = walkSessionData {
+                WalkSummaryView(
+                    sessionData: sessionData,
+                    // 将 CoreLocation 坐标转换为我们的 Codable 结构体
+                    routeCoordinates: walkManager.locationService.routeCoordinates.map { 
+                        RoutePoint(lat: $0.latitude, lon: $0.longitude) 
+                    },
+                    onFinish: {
+                        showSummary = false
+                        walkSessionData = nil
+                    }
+                )
+            }
         }
         // 弹出奖励商店页
         .sheet(isPresented: $showShop) {
@@ -119,6 +132,10 @@ struct HomeView: View {
         // 弹出头像编辑器
         .sheet(isPresented: $showAvatarCreator) {
             AvatarCreatorView()
+        }
+        // 弹出设置页
+        .sheet(isPresented: $showSettings) {
+            SettingsView()
         }
     }
     
@@ -149,9 +166,22 @@ struct HomeView: View {
                     .foregroundColor(.appBrown)
                 #endif
                 
-                // 2. 右侧骨头币按钮
-                HStack {
+                // 2. 右侧按钮组
+                HStack(spacing: 10) {
                     Spacer()
+                    
+                    // 设置按钮
+                    Button(action: { showSettings = true }) {
+                        Image(systemName: "gearshape.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(.appBrown)
+                            .frame(width: 36, height: 36)
+                            .background(Color.white.opacity(0.8))
+                            .clipShape(Circle())
+                            .shadow(color: .black.opacity(0.05), radius: 5)
+                    }
+                    
+                    // 骨头币按钮
                     Button(action: { showShop = true }) {
                         HStack(spacing: 5) {
                             Text("🦴")
@@ -282,6 +312,52 @@ struct HomeView: View {
             )
             .ignoresSafeArea()
             
+            // DEBUG: 天气调试按钮 (左上角)
+            #if DEBUG
+            VStack {
+                HStack {
+                    Menu {
+                        Section("设置天气条件") {
+                            Button("☀️ 晴天 25°C") { setTestWeather(.sunny, temperature: 25) }
+                            Button("☁️ 多云 20°C") { setTestWeather(.cloudy, temperature: 20) }
+                            Button("🌧 雨天 18°C") { setTestWeather(.rainy, temperature: 18) }
+                            Button("❄️ 雪天 -5°C") { setTestWeather(.snowy, temperature: -5) }
+                            Button("🌫 雾天 10°C") { setTestWeather(.foggy, temperature: 10) }
+                        }
+                        Section("极端温度测试") {
+                            Button("🥶 零下 -3°C") { setTestWeather(.cloudy, temperature: -3) }
+                            Button("🥵 高温 36°C") { setTestWeather(.sunny, temperature: 36) }
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: walkManager.currentWeather?.condition.iconSymbol ?? "cloud.fill")
+                            if let weather = walkManager.currentWeather {
+                                Text("\(Int(weather.temperature))°C")
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                            } else {
+                                Text("天气")
+                                    .font(.caption)
+                            }
+                            Image(systemName: "ladybug.fill")
+                                .font(.system(size: 8))
+                                .foregroundColor(.red)
+                        }
+                        .foregroundColor(.appBrown)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(Color.white.opacity(0.9))
+                        .clipShape(Capsule())
+                        .shadow(radius: 3)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 60)
+                Spacer()
+            }
+            #endif
+            
             // 2. 悬浮数据面板
             VStack(spacing: 20) {
                 HStack(spacing: 40) {
@@ -309,7 +385,8 @@ struct HomeView: View {
                 // 结束按钮
                 Button(action: {
                     withAnimation {
-                        walkManager.stopWalk()
+                        // 结束遛狗并获取会话数据
+                        walkSessionData = walkManager.stopWalk()
                         showSummary = true
                     }
                 }) {

@@ -21,6 +21,17 @@ struct UserData: Codable {
     
     // MARK: - 成就系统
     var unlockedAchievements: Set<String> = []  // 已解锁成就 ID 集合
+    var revealedAchievementHints: Set<String> = []  // 已揭示线索的成就 ID
+    
+    // MARK: - 每日提醒设置
+    var dailyReminderEnabled: Bool = false      // 是否启用每日提醒
+    var dailyReminderTime: Date = {             // 提醒时间（默认 18:00）
+        var components = DateComponents()
+        components.hour = 18
+        components.minute = 0
+        return Calendar.current.date(from: components) ?? Date()
+    }()
+    var lastNudgedFriends: [String: Date] = [:] // 上次催促好友的时间（friendID: Date）
     
     // MARK: - 奖励系统（称号 & 主题）
     var ownedTitleIds: Set<String> = ["title_default"]    // 已拥有的称号 ID
@@ -38,42 +49,63 @@ struct UserData: Codable {
     // MARK: - 初始化
     #if DEBUG
     // 测试模式：初始 1000 骨头币，方便测试购买功能
-    static let initial = UserData(
-        totalBones: 1000,
-        lastWalkDate: nil,
-        totalWalks: 0,
-        totalDistance: 0.0,
-        currentStreak: 0,
-        maxStreak: 0,
-        lastStreakDate: nil,
-        unlockedAchievements: [],
-        ownedTitleIds: ["title_default"],
-        ownedThemeIds: ["theme_default"],
-        equippedTitleId: "title_default",
-        equippedThemeId: "theme_default",
-        avatarURL: nil,
-        avatarImageCachePath: nil,
-        inventory: [:]
-    )
+    static let initial = UserData()
     #else
-    static let initial = UserData(
-        totalBones: 0,
-        lastWalkDate: nil,
-        totalWalks: 0,
-        totalDistance: 0.0,
-        currentStreak: 0,
-        maxStreak: 0,
-        lastStreakDate: nil,
-        unlockedAchievements: [],
-        ownedTitleIds: ["title_default"],
-        ownedThemeIds: ["theme_default"],
-        equippedTitleId: "title_default",
-        equippedThemeId: "theme_default",
-        avatarURL: nil,
-        avatarImageCachePath: nil,
-        inventory: [:]
-    )
+    static let initial = UserData()
     #endif
+    
+    init(
+        totalBones: Int = {
+            #if DEBUG
+            return 1000
+            #else
+            return 0
+            #endif
+        }(),
+        lastWalkDate: Date? = nil,
+        totalWalks: Int = 0,
+        totalDistance: Double = 0.0,
+        currentStreak: Int = 0,
+        maxStreak: Int = 0,
+        lastStreakDate: Date? = nil,
+        unlockedAchievements: Set<String> = [],
+        revealedAchievementHints: Set<String> = [],
+        dailyReminderEnabled: Bool = false,
+        dailyReminderTime: Date = {
+            var components = DateComponents()
+            components.hour = 18
+            components.minute = 0
+            return Calendar.current.date(from: components) ?? Date()
+        }(),
+        lastNudgedFriends: [String: Date] = [:],
+        ownedTitleIds: Set<String> = ["title_default"],
+        ownedThemeIds: Set<String> = ["theme_default"],
+        equippedTitleId: String = "title_default",
+        equippedThemeId: String = "theme_default",
+        avatarURL: String? = nil,
+        avatarImageCachePath: String? = nil,
+        inventory: [String: Int] = [:]
+    ) {
+        self.totalBones = totalBones
+        self.lastWalkDate = lastWalkDate
+        self.totalWalks = totalWalks
+        self.totalDistance = totalDistance
+        self.currentStreak = currentStreak
+        self.maxStreak = maxStreak
+        self.lastStreakDate = lastStreakDate
+        self.unlockedAchievements = unlockedAchievements
+        self.revealedAchievementHints = revealedAchievementHints
+        self.dailyReminderEnabled = dailyReminderEnabled
+        self.dailyReminderTime = dailyReminderTime
+        self.lastNudgedFriends = lastNudgedFriends
+        self.ownedTitleIds = ownedTitleIds
+        self.ownedThemeIds = ownedThemeIds
+        self.equippedTitleId = equippedTitleId
+        self.equippedThemeId = equippedThemeId
+        self.avatarURL = avatarURL
+        self.avatarImageCachePath = avatarImageCachePath
+        self.inventory = inventory
+    }
     
     // MARK: - 辅助方法
     
@@ -92,6 +124,11 @@ struct UserData: Codable {
         unlockedAchievements.contains(achievementId)
     }
     
+    /// 检查成就线索是否已揭示
+    func isAchievementHintRevealed(_ achievementId: String) -> Bool {
+        revealedAchievementHints.contains(achievementId)
+    }
+    
     /// 检查称号是否已拥有
     func isTitleOwned(_ titleId: String) -> Bool {
         ownedTitleIds.contains(titleId)
@@ -100,6 +137,12 @@ struct UserData: Codable {
     /// 检查主题是否已拥有
     func isThemeOwned(_ themeId: String) -> Bool {
         ownedThemeIds.contains(themeId)
+    }
+    
+    /// 检查今天是否可以催促该好友
+    func canNudgeFriend(_ friendId: String) -> Bool {
+        guard let lastNudged = lastNudgedFriends[friendId] else { return true }
+        return !Calendar.current.isDateInToday(lastNudged)
     }
 }
 

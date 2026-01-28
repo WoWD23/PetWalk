@@ -23,14 +23,21 @@ struct RewardShopView: View {
     enum ShopTab: String, CaseIterable {
         case titles = "称号"
         case themes = "主题"
+        case hints = "线索"
         
         var iconSymbol: String {
             switch self {
             case .titles: return "person.text.rectangle.fill"
             case .themes: return "paintpalette.fill"
+            case .hints: return "lightbulb.fill"
             }
         }
     }
+    
+    // 线索抽取状态
+    @State private var isDrawingHint = false
+    @State private var drawnAchievement: Achievement?
+    @State private var showHintResult = false
     
     var body: some View {
         NavigationView {
@@ -58,7 +65,7 @@ struct RewardShopView: View {
                                         onEquip: { equipTitle(title) }
                                     )
                                 }
-                            } else {
+                            } else if selectedTab == .themes {
                                 ForEach(AppTheme.allThemes) { theme in
                                     ThemeCard(
                                         theme: theme,
@@ -69,6 +76,9 @@ struct RewardShopView: View {
                                         onEquip: { equipTheme(theme) }
                                     )
                                 }
+                            } else {
+                                // 线索商店
+                                hintsShopContent
                             }
                         }
                         .padding()
@@ -217,6 +227,182 @@ struct RewardShopView: View {
         withAnimation {
             showFeedback = true
         }
+    }
+    
+    // MARK: - 线索商店内容
+    var hintsShopContent: some View {
+        VStack(spacing: 20) {
+            // 说明卡片
+            VStack(spacing: 12) {
+                Image(systemName: "lightbulb.fill")
+                    .font(.system(size: 40))
+                    .foregroundColor(.yellow)
+                
+                Text("成就线索")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                    .foregroundColor(.appBrown)
+                
+                Text("揭示隐藏成就的详细信息，帮助你定向挑战！\n解锁线索后，成就会显示具体内容，但仍需完成条件才能获得奖励。")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .multilineTextAlignment(.center)
+            }
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(Color.yellow.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 15))
+            
+            // 统计信息
+            let secretAchievements = Achievement.allAchievements.filter { $0.isSecret }
+            let revealedCount = dataManager.userData.revealedAchievementHints.count
+            let unlockedSecretCount = secretAchievements.filter { dataManager.userData.isAchievementUnlocked($0.id) }.count
+            let remainingSecret = secretAchievements.count - revealedCount - unlockedSecretCount
+            
+            HStack(spacing: 30) {
+                VStack(spacing: 4) {
+                    Text("\(secretAchievements.count)")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.purple)
+                    Text("隐藏成就")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+                
+                VStack(spacing: 4) {
+                    Text("\(revealedCount)")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.yellow)
+                    Text("已揭示")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+                
+                VStack(spacing: 4) {
+                    Text("\(remainingSecret)")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundColor(.orange)
+                    Text("待探索")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+            }
+            .padding()
+            .frame(maxWidth: .infinity)
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 15))
+            .shadow(color: .black.opacity(0.05), radius: 5)
+            
+            // 随机抽取卡片
+            HintDrawCard(
+                title: "随机线索",
+                description: "随机揭示一个隐藏成就的详细信息",
+                price: 30,
+                iconSymbol: "dice.fill",
+                canAfford: dataManager.userData.totalBones >= 30,
+                isAvailable: remainingSecret > 0,
+                onDraw: { drawRandomHint() }
+            )
+            
+            // 按类别抽取
+            VStack(spacing: 12) {
+                Text("指定类别线索")
+                    .font(.headline)
+                    .foregroundColor(.appBrown)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                
+                ForEach(AchievementCategory.allCases, id: \.self) { category in
+                    let categorySecrets = secretAchievements.filter { $0.category == category }
+                    let categoryRemaining = categorySecrets.filter { 
+                        !dataManager.userData.isAchievementUnlocked($0.id) &&
+                        !dataManager.userData.isAchievementHintRevealed($0.id)
+                    }.count
+                    
+                    if categorySecrets.count > 0 {
+                        HintCategoryCard(
+                            category: category,
+                            remainingCount: categoryRemaining,
+                            price: 50,
+                            canAfford: dataManager.userData.totalBones >= 50,
+                            onDraw: { drawCategoryHint(category) }
+                        )
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $showHintResult) {
+            if let achievement = drawnAchievement {
+                HintRevealView(achievement: achievement)
+            }
+        }
+    }
+    
+    // MARK: - 抽取线索逻辑
+    
+    private func drawRandomHint() {
+        let secretAchievements = Achievement.allAchievements.filter { achievement in
+            achievement.isSecret &&
+            !dataManager.userData.isAchievementUnlocked(achievement.id) &&
+            !dataManager.userData.isAchievementHintRevealed(achievement.id)
+        }
+        
+        guard !secretAchievements.isEmpty else {
+            showFeedbackMessage("没有可揭示的隐藏成就了", success: false)
+            return
+        }
+        
+        guard dataManager.userData.totalBones >= 30 else {
+            showFeedbackMessage("骨头币不足", success: false)
+            return
+        }
+        
+        // 扣费
+        var userData = dataManager.userData
+        userData.totalBones -= 30
+        
+        // 随机选择一个
+        if let selected = secretAchievements.randomElement() {
+            userData.revealedAchievementHints.insert(selected.id)
+            drawnAchievement = selected
+            showHintResult = true
+        }
+        
+        dataManager.updateUserData(userData)
+    }
+    
+    private func drawCategoryHint(_ category: AchievementCategory) {
+        let categorySecrets = Achievement.allAchievements.filter { achievement in
+            achievement.isSecret &&
+            achievement.category == category &&
+            !dataManager.userData.isAchievementUnlocked(achievement.id) &&
+            !dataManager.userData.isAchievementHintRevealed(achievement.id)
+        }
+        
+        guard !categorySecrets.isEmpty else {
+            showFeedbackMessage("该类别没有可揭示的隐藏成就了", success: false)
+            return
+        }
+        
+        guard dataManager.userData.totalBones >= 50 else {
+            showFeedbackMessage("骨头币不足", success: false)
+            return
+        }
+        
+        // 扣费
+        var userData = dataManager.userData
+        userData.totalBones -= 50
+        
+        // 随机选择一个
+        if let selected = categorySecrets.randomElement() {
+            userData.revealedAchievementHints.insert(selected.id)
+            drawnAchievement = selected
+            showHintResult = true
+        }
+        
+        dataManager.updateUserData(userData)
     }
 }
 
@@ -425,6 +611,292 @@ struct ThemeCard: View {
         .background(Color.white)
         .clipShape(RoundedRectangle(cornerRadius: 15))
         .shadow(color: .black.opacity(0.05), radius: 5)
+    }
+}
+
+// MARK: - 线索抽取卡片
+struct HintDrawCard: View {
+    let title: String
+    let description: String
+    let price: Int
+    let iconSymbol: String
+    let canAfford: Bool
+    let isAvailable: Bool
+    let onDraw: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 15) {
+            // 图标
+            ZStack {
+                Circle()
+                    .fill(Color.yellow.opacity(0.2))
+                    .frame(width: 60, height: 60)
+                
+                Image(systemName: iconSymbol)
+                    .font(.system(size: 26))
+                    .foregroundColor(.yellow)
+            }
+            
+            // 内容
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.headline)
+                    .foregroundColor(.appBrown)
+                
+                Text(description)
+                    .font(.caption)
+                    .foregroundColor(.gray)
+                    .lineLimit(2)
+            }
+            
+            Spacer()
+            
+            // 抽取按钮
+            Button(action: onDraw) {
+                HStack(spacing: 4) {
+                    Text("🦴")
+                    Text("\(price)")
+                }
+                .font(.subheadline)
+                .fontWeight(.medium)
+                .foregroundColor(.white)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+                .background(canAfford && isAvailable ? Color.yellow : Color.gray)
+                .clipShape(Capsule())
+            }
+            .disabled(!canAfford || !isAvailable)
+        }
+        .padding()
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 15))
+        .shadow(color: .black.opacity(0.05), radius: 5)
+    }
+}
+
+// MARK: - 类别线索卡片
+struct HintCategoryCard: View {
+    let category: AchievementCategory
+    let remainingCount: Int
+    let price: Int
+    let canAfford: Bool
+    let onDraw: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            // 图标
+            Image(systemName: category.iconSymbol)
+                .font(.system(size: 20))
+                .foregroundColor(category.color)
+                .frame(width: 36, height: 36)
+                .background(category.color.opacity(0.15))
+                .clipShape(Circle())
+            
+            // 内容
+            VStack(alignment: .leading, spacing: 2) {
+                Text(category.title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.appBrown)
+                
+                Text("剩余 \(remainingCount) 个隐藏成就")
+                    .font(.caption)
+                    .foregroundColor(.gray)
+            }
+            
+            Spacer()
+            
+            // 按钮
+            if remainingCount > 0 {
+                Button(action: onDraw) {
+                    HStack(spacing: 4) {
+                        Text("🦴")
+                        Text("\(price)")
+                    }
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(canAfford ? category.color : Color.gray)
+                    .clipShape(Capsule())
+                }
+                .disabled(!canAfford)
+            } else {
+                Text("已揭示全部")
+                    .font(.caption)
+                    .foregroundColor(.green)
+            }
+        }
+        .padding()
+        .background(Color.white)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .shadow(color: .black.opacity(0.03), radius: 3)
+    }
+}
+
+// MARK: - 线索揭示弹窗
+struct HintRevealView: View {
+    let achievement: Achievement
+    @Environment(\.dismiss) var dismiss
+    
+    @State private var isRevealing = true
+    @State private var cardRotation: Double = 0
+    @State private var showContent = false
+    
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.3).ignoresSafeArea()
+            
+            VStack(spacing: 30) {
+                if isRevealing {
+                    // 翻转动画
+                    revealingCard
+                } else {
+                    // 揭示的内容
+                    revealedContent
+                }
+            }
+            .padding()
+        }
+        .onAppear {
+            // 翻转动画
+            withAnimation(.easeInOut(duration: 0.6).delay(0.5)) {
+                cardRotation = 180
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) {
+                withAnimation {
+                    isRevealing = false
+                    showContent = true
+                }
+            }
+        }
+    }
+    
+    private var revealingCard: some View {
+        ZStack {
+            // 背面（问号）
+            RoundedRectangle(cornerRadius: 20)
+                .fill(
+                    LinearGradient(
+                        colors: [Color.purple, Color.purple.opacity(0.7)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .frame(width: 250, height: 350)
+                .overlay(
+                    VStack(spacing: 20) {
+                        Image(systemName: "questionmark")
+                            .font(.system(size: 80, weight: .bold))
+                            .foregroundColor(.white.opacity(0.8))
+                        
+                        Text("隐藏成就")
+                            .font(.title2)
+                            .fontWeight(.bold)
+                            .foregroundColor(.white)
+                    }
+                )
+                .rotation3DEffect(
+                    .degrees(cardRotation > 90 ? 180 : 0),
+                    axis: (x: 0, y: 1, z: 0)
+                )
+                .opacity(cardRotation < 90 ? 1 : 0)
+            
+            // 正面（成就信息）
+            achievementCard
+                .rotation3DEffect(
+                    .degrees(cardRotation - 180),
+                    axis: (x: 0, y: 1, z: 0)
+                )
+                .opacity(cardRotation > 90 ? 1 : 0)
+        }
+        .rotation3DEffect(
+            .degrees(cardRotation),
+            axis: (x: 0, y: 1, z: 0)
+        )
+    }
+    
+    private var achievementCard: some View {
+        RoundedRectangle(cornerRadius: 20)
+            .fill(Color.white)
+            .frame(width: 250, height: 350)
+            .overlay(
+                VStack(spacing: 15) {
+                    // 图标
+                    ZStack {
+                        Circle()
+                            .fill(achievement.category.color.opacity(0.2))
+                            .frame(width: 80, height: 80)
+                        
+                        Image(systemName: achievement.iconSymbol)
+                            .font(.system(size: 36))
+                            .foregroundColor(achievement.category.color)
+                    }
+                    
+                    // 稀有度
+                    Text(achievement.rarity.displayName)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                        .background(achievement.rarity.color.opacity(0.2))
+                        .foregroundColor(achievement.rarity.color)
+                        .clipShape(Capsule())
+                    
+                    // 名称
+                    Text(achievement.name)
+                        .font(.title3)
+                        .fontWeight(.bold)
+                        .foregroundColor(.appBrown)
+                        .multilineTextAlignment(.center)
+                    
+                    // 描述
+                    Text(achievement.description)
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal)
+                    
+                    // 奖励
+                    HStack(spacing: 4) {
+                        Text("🦴")
+                        Text("+\(achievement.rewardBones)")
+                            .fontWeight(.bold)
+                    }
+                    .foregroundColor(.appGreenMain)
+                }
+                .padding()
+            )
+            .shadow(color: .black.opacity(0.1), radius: 10)
+    }
+    
+    private var revealedContent: some View {
+        VStack(spacing: 20) {
+            // 成就卡片
+            achievementCard
+            
+            // 提示
+            Text("成就线索已揭示！")
+                .font(.headline)
+                .foregroundColor(.white)
+            
+            Text("完成条件后即可解锁获得奖励")
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.8))
+            
+            // 关闭按钮
+            Button(action: { dismiss() }) {
+                Text("知道了")
+                    .font(.headline)
+                    .foregroundColor(.appBrown)
+                    .padding(.horizontal, 40)
+                    .padding(.vertical, 12)
+                    .background(Color.white)
+                    .clipShape(Capsule())
+            }
+        }
     }
 }
 

@@ -18,6 +18,12 @@ struct WalkSessionData {
     let weather: WeatherInfo?      // 天气信息（可选）
     let passedRestaurantCount: Int // 路过餐厅数量（Level 4）
     let homeLoopCount: Int         // 绕起点圈数（Level 4）
+    
+    // 新增字段
+    var maxDistanceFromStart: Double = 0  // 离起点最远距离（公里）
+    var spinCount: Int = 0                // 原地转圈次数
+    var isClosedLoop: Bool = false        // 是否形成闭环
+    var returnSpeedRatio: Double = 0      // 返程速度与去程速度的比值
 }
 
 // MARK: - 天气信息
@@ -211,6 +217,17 @@ class AchievementManager {
         
         let calendar = Calendar.current
         let hour = calendar.component(.hour, from: sessionData.startTime)
+        let weekday = calendar.component(.weekday, from: sessionData.startTime) // 1=周日, 7=周六
+        
+        // 闻鸡起舞 (4:00 - 6:00)
+        if hour >= 4 && hour < 6 {
+            unlocked.append(contentsOf: tryUnlock("environment_rooster", userData: &userData))
+        }
+        
+        // 暗夜骑士 (23:00 - 02:00)
+        if hour >= 23 || hour < 2 {
+            unlocked.append(contentsOf: tryUnlock("environment_dark_knight", userData: &userData))
+        }
         
         // 早起的鸟儿 (6点前)
         if hour < 6 {
@@ -222,25 +239,85 @@ class AchievementManager {
             unlocked.append(contentsOf: tryUnlock("environment_night_owl", userData: &userData))
         }
         
+        // 周末狂欢检测 (周六或周日)
+        if weekday == 1 || weekday == 7 {
+            updateWeekendWalkCount()
+            if getConsecutiveWeekendCount() >= 4 {
+                unlocked.append(contentsOf: tryUnlock("environment_weekend_4", userData: &userData))
+            }
+        }
+        
         // 天气相关成就
         if let weather = sessionData.weather {
-            // 雨中曲 (雨天遛狗超过10分钟)
-            if weather.condition == "rainy" && sessionData.duration >= 600 {
+            // 风雨无阻 (雨天遛狗超过15分钟)
+            if weather.condition == "rainy" && sessionData.duration >= 900 {
                 unlocked.append(contentsOf: tryUnlock("environment_rainy", userData: &userData))
             }
             
-            // 冰雪奇缘 (气温低于0度)
-            if weather.temperature < 0 {
-                unlocked.append(contentsOf: tryUnlock("environment_cold", userData: &userData))
+            // 冰雪奇缘 (气温低于-5度)
+            if weather.temperature < -5 {
+                unlocked.append(contentsOf: tryUnlock("environment_frozen", userData: &userData))
             }
             
-            // 烈日当空 (气温超过35度)
-            if weather.temperature > 35 {
-                unlocked.append(contentsOf: tryUnlock("environment_hot", userData: &userData))
+            // 夏日战士 (气温超过35度 + 傍晚时段)
+            if weather.temperature > 35 && hour >= 17 && hour <= 20 {
+                unlocked.append(contentsOf: tryUnlock("environment_summer", userData: &userData))
             }
         }
         
         return unlocked
+    }
+    
+    // MARK: - 周末遛狗计数
+    
+    private let weekendWalkKey = "weekendWalkData"
+    
+    private func updateWeekendWalkCount() {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        
+        var data = getWeekendWalkData()
+        
+        // 检查是否是新的一周
+        if let lastDate = data.lastWeekendDate {
+            let weeksDiff = calendar.dateComponents([.weekOfYear], from: lastDate, to: today).weekOfYear ?? 0
+            if weeksDiff > 1 {
+                // 超过一周没遛，重置
+                data.consecutiveWeekends = 1
+            } else if weeksDiff == 1 || (weeksDiff == 0 && !calendar.isDate(lastDate, inSameDayAs: today)) {
+                // 连续周末
+                data.consecutiveWeekends += 1
+            }
+            // 同一天不增加计数
+        } else {
+            data.consecutiveWeekends = 1
+        }
+        
+        data.lastWeekendDate = today
+        saveWeekendWalkData(data)
+    }
+    
+    private func getConsecutiveWeekendCount() -> Int {
+        return getWeekendWalkData().consecutiveWeekends
+    }
+    
+    private struct WeekendWalkData: Codable {
+        var lastWeekendDate: Date?
+        var consecutiveWeekends: Int = 0
+    }
+    
+    private func getWeekendWalkData() -> WeekendWalkData {
+        guard let data = UserDefaults.standard.data(forKey: weekendWalkKey),
+              let decoded = try? JSONDecoder().decode(WeekendWalkData.self, from: data) else {
+            return WeekendWalkData()
+        }
+        return decoded
+    }
+    
+    private func saveWeekendWalkData(_ data: WeekendWalkData) {
+        if let encoded = try? JSONEncoder().encode(data) {
+            UserDefaults.standard.set(encoded, forKey: weekendWalkKey)
+        }
     }
     
     // MARK: - 复杂上下文成就检测 (Level 4)
@@ -251,9 +328,9 @@ class AchievementManager {
     ) -> [Achievement] {
         var unlocked: [Achievement] = []
         
-        // 钢铁意志 (路过3家餐厅未停留)
+        // 减肥特种兵 (路过3家餐厅未停留)
         if sessionData.passedRestaurantCount >= 3 {
-            unlocked.append(contentsOf: tryUnlock("context_restaurant_3", userData: &userData))
+            unlocked.append(contentsOf: tryUnlock("context_iron_will", userData: &userData))
         }
         
         // 美食诱惑大师 (路过10家餐厅未停留)
@@ -263,10 +340,57 @@ class AchievementManager {
         
         // 三过家门而不入 (绕起点3圈)
         if sessionData.homeLoopCount >= 3 {
-            unlocked.append(contentsOf: tryUnlock("context_loop_3", userData: &userData))
+            unlocked.append(contentsOf: tryUnlock("context_wanderer", userData: &userData))
         }
         
+        // 鬼打墙 (原地转圈超过5次)
+        if sessionData.spinCount >= 5 {
+            unlocked.append(contentsOf: tryUnlock("context_dizzy", userData: &userData))
+        }
+        
+        // 完美的圆 (形成闭环)
+        if sessionData.isClosedLoop {
+            unlocked.append(contentsOf: tryUnlock("context_artist", userData: &userData))
+        }
+        
+        // 我想回家 (返程速度是去程的2倍以上)
+        if sessionData.returnSpeedRatio >= 2.0 {
+            unlocked.append(contentsOf: tryUnlock("context_homing", userData: &userData))
+        }
+        
+        // 拓荒者 (离家超过5公里)
+        if sessionData.maxDistanceFromStart >= 5.0 {
+            unlocked.append(contentsOf: tryUnlock("context_explorer", userData: &userData))
+        }
+        
+        // 嗅探专家 (时长>30分钟，距离<500米)
+        if sessionData.duration >= 1800 && sessionData.distance < 0.5 {
+            unlocked.append(contentsOf: tryUnlock("context_sniffer", userData: &userData))
+        }
+        
+        // 长情陪伴 (累计时长100小时)
+        updateTotalWalkDuration(sessionData.duration)
+        if getTotalWalkDurationHours() >= 100 {
+            unlocked.append(contentsOf: tryUnlock("context_companion_100", userData: &userData))
+        }
+        
+        // 地头蛇 (50条不同轨迹) - 需要轨迹管理器支持
+        // 暂时跳过，需要单独的轨迹去重逻辑
+        
         return unlocked
+    }
+    
+    // MARK: - 累计遛狗时长
+    
+    private let totalDurationKey = "totalWalkDuration"
+    
+    private func updateTotalWalkDuration(_ duration: TimeInterval) {
+        let current = UserDefaults.standard.double(forKey: totalDurationKey)
+        UserDefaults.standard.set(current + duration, forKey: totalDurationKey)
+    }
+    
+    private func getTotalWalkDurationHours() -> Double {
+        return UserDefaults.standard.double(forKey: totalDurationKey) / 3600.0
     }
     
     // MARK: - 辅助方法：尝试解锁成就

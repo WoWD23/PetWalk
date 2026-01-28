@@ -9,14 +9,17 @@ import SwiftUI
 import PhotosUI
 
 struct WalkSummaryView: View {
-    // 输入参数：本次遛狗的数据
-    let duration: TimeInterval
-    let distance: Double
+    // 输入参数：完整的遛狗会话数据
+    let sessionData: WalkSessionData
     let routeCoordinates: [RoutePoint] // 轨迹数据
-    let walkStartTime: Date // 遛狗开始时间（用于成就检测）
     
     // 回调：完成保存
     var onFinish: () -> Void
+    
+    // 便捷访问属性
+    var duration: TimeInterval { sessionData.duration }
+    var distance: Double { sessionData.distance }
+    var walkStartTime: Date { sessionData.startTime }
     
     @StateObject private var dataManager = DataManager.shared
     
@@ -34,12 +37,10 @@ struct WalkSummaryView: View {
     @State private var showAchievementPopup = false
     @State private var currentAchievementIndex = 0
     
-    // 初始化（添加默认值以兼容旧调用）
-    init(duration: TimeInterval, distance: Double, routeCoordinates: [RoutePoint], walkStartTime: Date = Date(), onFinish: @escaping () -> Void) {
-        self.duration = duration
-        self.distance = distance
+    // 初始化
+    init(sessionData: WalkSessionData, routeCoordinates: [RoutePoint], onFinish: @escaping () -> Void) {
+        self.sessionData = sessionData
         self.routeCoordinates = routeCoordinates
-        self.walkStartTime = walkStartTime
         self.onFinish = onFinish
     }
     
@@ -238,11 +239,11 @@ struct WalkSummaryView: View {
         let bones = GameSystem.shared.calculateBones(distanceKm: distance)
         
         // 检测成就（需要先获取副本，修改后再设置回去）
+        // 使用完整的 sessionData 进行成就检测（包含天气、POI 等信息）
         var userData = dataManager.userData
         let achievements = AchievementManager.shared.checkAndUnlockAchievements(
             userData: &userData,
-            walkDistance: distance,
-            walkStartTime: walkStartTime
+            sessionData: sessionData
         )
         
         // 计算成就奖励的骨头币
@@ -260,6 +261,12 @@ struct WalkSummaryView: View {
                 showAchievementPopup = true
             }
         }
+        
+        // 打印调试信息
+        if let weather = sessionData.weather {
+            print("WalkSummaryView: 天气 - \(weather.condition), \(Int(weather.temperature))°C")
+        }
+        print("WalkSummaryView: 路过餐厅 \(sessionData.passedRestaurantCount) 家, 绕圈 \(sessionData.homeLoopCount) 次")
     }
     
     // 保存逻辑
@@ -272,8 +279,7 @@ struct WalkSummaryView: View {
         // 再次调用成就检测以确保数据一致性（已经解锁的不会重复解锁）
         _ = AchievementManager.shared.checkAndUnlockAchievements(
             userData: &currentUserData,
-            walkDistance: distance,
-            walkStartTime: walkStartTime
+            sessionData: sessionData
         )
         
         dataManager.updateUserData(currentUserData)

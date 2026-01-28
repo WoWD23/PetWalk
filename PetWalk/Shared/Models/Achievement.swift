@@ -61,6 +61,32 @@ struct LandmarkCoordinate: Codable, Hashable {
     let longitude: Double
 }
 
+// MARK: - 成就稀有度
+enum AchievementRarity: String, Codable {
+    case common     // 普通 (>50%)
+    case rare       // 稀有 (10-50%)
+    case epic       // 史诗 (1-10%)
+    case legendary  // 传说 (<1%)
+    
+    var displayName: String {
+        switch self {
+        case .common: return "普通"
+        case .rare: return "稀有"
+        case .epic: return "史诗"
+        case .legendary: return "传说"
+        }
+    }
+    
+    var color: Color {
+        switch self {
+        case .common: return .gray
+        case .rare: return .blue
+        case .epic: return .purple
+        case .legendary: return .yellow
+        }
+    }
+}
+
 // MARK: - 成就数据模型
 struct Achievement: Identifiable, Codable, Hashable {
     let id: String
@@ -70,6 +96,11 @@ struct Achievement: Identifiable, Codable, Hashable {
     let requirement: Int       // 达成条件数值
     let rewardBones: Int       // 奖励骨头币
     let iconSymbol: String     // SF Symbol 图标
+    
+    // MARK: - 新增字段
+    var isSecret: Bool = false                        // 是否为隐藏成就
+    var rarity: AchievementRarity = .common           // 稀有度（可动态计算）
+    var gameCenterID: String? = nil                   // Game Center 成就 ID
     
     // MARK: - 扩展字段（可选）
     // Level 2: 景点打卡
@@ -81,11 +112,14 @@ struct Achievement: Identifiable, Codable, Hashable {
     var speedThreshold: Double? = nil                 // 速度阈值 km/h
     var minDuration: Double? = nil                    // 最小时长（秒）
     var maxDistance: Double? = nil                    // 最大距离（公里）
+    var minDistance: Double? = nil                    // 最小距离（公里）
     
     // Level 3: 天气/环境
     var weatherCondition: String? = nil               // 天气条件（rainy, snowy 等）
     var temperatureMin: Double? = nil                 // 最低温度
     var temperatureMax: Double? = nil                 // 最高温度
+    var timeRangeStart: Int? = nil                    // 时间范围开始（小时）
+    var timeRangeEnd: Int? = nil                      // 时间范围结束（小时）
     
     // MARK: - 静态成就列表
     static let allAchievements: [Achievement] = [
@@ -127,13 +161,34 @@ struct Achievement: Identifiable, Codable, Hashable {
             iconSymbol: "building.columns.fill"
         ),
         Achievement(
+            id: "distance_42",
+            name: "全马选手",
+            description: "累计遛狗 42.195 公里，不知不觉，你和狗狗跑完了一场马拉松！",
+            category: .distance,
+            requirement: 42,
+            rewardBones: 150,
+            iconSymbol: "figure.run"
+        ),
+        Achievement(
             id: "distance_500",
-            name: "马拉松冠军",
-            description: "累计遛狗 500 公里，这已经超过了一场马拉松的距离！",
+            name: "日行千里",
+            description: "累计遛狗 500 公里，距离回家还有二万四千五百里。",
             category: .distance,
             requirement: 500,
             rewardBones: 500,
             iconSymbol: "trophy.fill"
+        ),
+        Achievement(
+            id: "distance_1000",
+            name: "万里长征",
+            description: "累计遛狗 1000 公里，这是一段史诗级的旅程！",
+            category: .distance,
+            requirement: 1000,
+            rewardBones: 1000,
+            iconSymbol: "crown.fill",
+            isSecret: true,
+            rarity: .legendary,
+            gameCenterID: "petwalk.achievement.distance_1000"
         ),
         
         // ============ 频率类 ============
@@ -209,7 +264,9 @@ struct Achievement: Identifiable, Codable, Hashable {
             category: .streak,
             requirement: 100,
             rewardBones: 500,
-            iconSymbol: "medal.fill"
+            iconSymbol: "medal.fill",
+            isSecret: true,
+            rarity: .epic
         ),
         
         // ============ 景点打卡类 (Level 2) ============
@@ -256,21 +313,24 @@ struct Achievement: Identifiable, Codable, Hashable {
         Achievement(
             id: "performance_speed_fast",
             name: "闪电狗",
-            description: "单次遛狗平均配速超过 8 km/h。",
+            description: "单次遛狗平均配速超过 8 km/h。只要我跑得够快，寂寞就追不上我。",
             category: .performance,
             requirement: 8,
             rewardBones: 50,
             iconSymbol: "hare.fill",
+            isSecret: true,
+            rarity: .rare,
             speedThreshold: 8.0
         ),
         Achievement(
             id: "performance_speed_slow",
             name: "养生步伐",
-            description: "遛狗时长超过 30 分钟，但移动距离不足 500 米。",
+            description: "遛狗时长超过 30 分钟，但移动距离不足 500 米。每一根电线杆都值得仔细品味。",
             category: .performance,
             requirement: 1,
             rewardBones: 30,
             iconSymbol: "tortoise.fill",
+            isSecret: true,
             minDuration: 1800,  // 30分钟
             maxDistance: 0.5
         ),
@@ -295,13 +355,39 @@ struct Achievement: Identifiable, Codable, Hashable {
         
         // ============ 环境/天气类 (Level 3) ============
         Achievement(
+            id: "environment_rooster",
+            name: "闻鸡起舞",
+            description: "在凌晨 4:00 - 6:00 之间完成一次遛狗。你看过凌晨四点的城市吗？你的狗看过。",
+            category: .environment,
+            requirement: 1,
+            rewardBones: 50,
+            iconSymbol: "sunrise.fill",
+            isSecret: true,
+            rarity: .rare,
+            timeRangeStart: 4,
+            timeRangeEnd: 6
+        ),
+        Achievement(
+            id: "environment_dark_knight",
+            name: "暗夜骑士",
+            description: "在深夜 23:00 - 02:00 之间遛狗。他是守护这座城市的沉默卫士。",
+            category: .environment,
+            requirement: 1,
+            rewardBones: 50,
+            iconSymbol: "moon.stars.fill",
+            isSecret: true,
+            rarity: .rare,
+            timeRangeStart: 23,
+            timeRangeEnd: 2
+        ),
+        Achievement(
             id: "environment_early_bird",
             name: "早起的鸟儿",
             description: "在早上 6 点前完成一次遛狗。",
             category: .environment,
             requirement: 1,
             rewardBones: 30,
-            iconSymbol: "sunrise.fill"
+            iconSymbol: "sun.horizon.fill"
         ),
         Achievement(
             id: "environment_night_owl",
@@ -310,67 +396,168 @@ struct Achievement: Identifiable, Codable, Hashable {
             category: .environment,
             requirement: 1,
             rewardBones: 30,
-            iconSymbol: "moon.stars.fill"
+            iconSymbol: "moon.fill"
         ),
         Achievement(
             id: "environment_rainy",
-            name: "雨中曲",
-            description: "在雨天遛狗超过 10 分钟。",
+            name: "风雨无阻",
+            description: "在雨天遛狗超过 15 分钟。落汤鸡，落汤狗，但心情是湿润的。",
             category: .environment,
             requirement: 1,
-            rewardBones: 50,
+            rewardBones: 60,
             iconSymbol: "cloud.rain.fill",
-            minDuration: 600,
+            isSecret: true,
+            rarity: .rare,
+            minDuration: 900,
             weatherCondition: "rainy"
         ),
         Achievement(
-            id: "environment_cold",
+            id: "environment_frozen",
             name: "冰雪奇缘",
-            description: "在气温低于 0°C 时遛狗。",
+            description: "在气温低于 -5°C 时遛狗。寒冷困不住一颗想出去撒野的心。",
             category: .environment,
             requirement: 1,
-            rewardBones: 50,
+            rewardBones: 80,
             iconSymbol: "snowflake",
-            temperatureMax: 0.0
+            isSecret: true,
+            rarity: .epic,
+            temperatureMax: -5.0
         ),
         Achievement(
-            id: "environment_hot",
-            name: "烈日当空",
-            description: "在气温超过 35°C 时遛狗。",
+            id: "environment_summer",
+            name: "夏日战士",
+            description: "在气温超过 35°C 的傍晚出门遛狗。",
             category: .environment,
             requirement: 1,
-            rewardBones: 50,
+            rewardBones: 60,
             iconSymbol: "sun.max.fill",
-            temperatureMin: 35.0
+            isSecret: true,
+            rarity: .rare,
+            temperatureMin: 35.0,
+            timeRangeStart: 17,
+            timeRangeEnd: 20
+        ),
+        Achievement(
+            id: "environment_weekend_4",
+            name: "周末狂欢",
+            description: "连续 4 个周六和周日都出门遛狗。",
+            category: .environment,
+            requirement: 4,
+            rewardBones: 100,
+            iconSymbol: "calendar.badge.clock",
+            rarity: .rare
         ),
         
-        // ============ 复杂上下文类 (Level 4) ============
+        // ============ 复杂上下文类 (Level 4) - 趣味彩蛋 ============
         Achievement(
-            id: "context_restaurant_3",
-            name: "钢铁意志",
-            description: "路过 3 家餐厅而没有停留。",
+            id: "context_iron_will",
+            name: "减肥特种兵",
+            description: "路过 3 家评分 4.0 以上的饭店但未停留。面对诱惑，心如止水。",
             category: .context,
             requirement: 3,
             rewardBones: 60,
-            iconSymbol: "fork.knife"
+            iconSymbol: "fork.knife",
+            isSecret: true,
+            rarity: .rare
         ),
         Achievement(
             id: "context_restaurant_10",
             name: "美食诱惑大师",
-            description: "路过 10 家餐厅而没有停留。",
+            description: "路过 10 家餐厅而没有停留。铁石心肠，意志如钢。",
             category: .context,
             requirement: 10,
             rewardBones: 150,
-            iconSymbol: "fork.knife.circle.fill"
+            iconSymbol: "fork.knife.circle.fill",
+            isSecret: true,
+            rarity: .epic
         ),
         Achievement(
-            id: "context_loop_3",
+            id: "context_wanderer",
             name: "三过家门而不入",
-            description: "绕着起点走了 3 圈但没有结束遛狗。",
+            description: "遛狗过程中 3 次经过家附近但没有结束遛狗。还不想回家，再玩五块钱的！",
             category: .context,
             requirement: 3,
             rewardBones: 80,
-            iconSymbol: "arrow.triangle.2.circlepath"
+            iconSymbol: "arrow.triangle.2.circlepath",
+            isSecret: true
+        ),
+        Achievement(
+            id: "context_dizzy",
+            name: "鬼打墙",
+            description: "遛狗轨迹在一个小范围内转圈超过 5 圈。转得我头都晕了……",
+            category: .context,
+            requirement: 5,
+            rewardBones: 50,
+            iconSymbol: "arrow.triangle.capsulepath",
+            isSecret: true
+        ),
+        Achievement(
+            id: "context_artist",
+            name: "完美的圆",
+            description: "遛狗轨迹形成一个闭环，起点终点几乎重合。你用脚画出了一个完美的圆。",
+            category: .context,
+            requirement: 1,
+            rewardBones: 80,
+            iconSymbol: "circle",
+            isSecret: true,
+            rarity: .rare
+        ),
+        Achievement(
+            id: "context_homing",
+            name: "我想回家",
+            description: "返程速度是去程的 2 倍以上。无论走多远，饭盆永远最有吸引力。",
+            category: .context,
+            requirement: 1,
+            rewardBones: 60,
+            iconSymbol: "house.and.flag.fill",
+            isSecret: true
+        ),
+        Achievement(
+            id: "context_companion_100",
+            name: "长情陪伴",
+            description: "累计遛狗时长达到 100 小时。陪伴是最长情的告白。",
+            category: .context,
+            requirement: 100,
+            rewardBones: 500,
+            iconSymbol: "heart.fill",
+            isSecret: true,
+            rarity: .legendary,
+            gameCenterID: "petwalk.achievement.companion_100"
+        ),
+        Achievement(
+            id: "context_explorer",
+            name: "拓荒者",
+            description: "去往一个离家直线距离超过 5km 的地方遛狗。发现了新大陆！",
+            category: .context,
+            requirement: 5,
+            rewardBones: 80,
+            iconSymbol: "safari.fill",
+            isSecret: true,
+            rarity: .rare,
+            minDistance: 5.0
+        ),
+        Achievement(
+            id: "context_local_lord",
+            name: "地头蛇",
+            description: "在以家为中心 1km 半径内，累计探索 50 条不同的轨迹。这片地盘，狗子都熟。",
+            category: .context,
+            requirement: 50,
+            rewardBones: 200,
+            iconSymbol: "map.fill",
+            isSecret: true,
+            rarity: .epic
+        ),
+        Achievement(
+            id: "context_sniffer",
+            name: "嗅探专家",
+            description: "单次遛狗时长超过 30 分钟，但里程不足 500 米。每一根电线杆都有它的故事。",
+            category: .context,
+            requirement: 1,
+            rewardBones: 30,
+            iconSymbol: "nose.fill",
+            isSecret: true,
+            minDuration: 1800,
+            maxDistance: 0.5
         )
     ]
     

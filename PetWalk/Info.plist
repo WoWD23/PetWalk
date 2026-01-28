@@ -8,5 +8,7 @@
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<key>NSUserNotificationsUsageDescription</key>
+	<string>PetWalk 需要发送通知来提醒你每日遛狗，以及接收好友的催促消息。</string>
 </dict>
 </plist>

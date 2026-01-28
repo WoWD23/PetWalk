@@ -283,14 +283,172 @@
 | `Core/Services/WeatherManager.swift` | 天气服务管理器 |
 | `Core/Services/POIDetector.swift` | POI 检测器 + 状态机 |
 
+### 9. 🌤 和风天气 (QWeather) API 集成
+- **WeatherManager 改造**: 移除 WeatherKit 依赖，改用和风天气 REST API
+  - API Host: `ma3h2qt5y2.re.qweatherapi.com`
+  - 认证方式: Bearer Token
+  - 支持图标代码和天气文字双重映射
+- **新增响应模型**: `QWeatherResponse`, `QWeatherNow`
+- **天气条件映射**:
+  - 100-103 (晴/少云) → sunny
+  - 104, 150-154 (阴/多云) → cloudy
+  - 300-399 (雨) → rainy
+  - 400-499 (雪) → snowy
+  - 500-515 (雾/霾) → foggy
+
+### 10. 🔗 遛狗流程集成
+- **WalkSessionManager 升级**:
+  - 新增 `currentWeather`, `visitedLandmarks` 属性
+  - `startWalk()` 时启动 LandmarkManager、POIDetector、获取天气
+  - `stopWalk()` 返回 `WalkSessionData` 结构
+  - 位置更新时自动检测景点和 POI
+- **HomeView 改造**:
+  - 结束遛狗时获取完整 `WalkSessionData`
+  - 传递 `sessionData` 给 WalkSummaryView
+- **WalkSummaryView 改造**:
+  - 接收 `WalkSessionData` 替代零散参数
+  - 使用完整数据进行成就检测（包含天气、POI 等）
+
 ## 🚧 遗留/待办 (Pending)
 1. **Ready Player Me 头像显示问题**: 创建头像后点击 Next，头像未能正确显示到首页。
-2. **WeatherKit 订阅**: 需要付费开发者账号才能使用 WeatherKit，目前 DEBUG 模式使用模拟数据。
+2. ~~**WeatherKit 订阅**~~: ✅ 已改用和风天气 (QWeather) API，无需付费订阅。后续上线前记得切换。
 3. **POI 实地测试**: Level 4 成就需要大量实地测试以调优参数，防止 GPS 漂移导致误判。
-4. **WalkSessionManager 集成**: 需要在遛狗流程中集成 LandmarkManager、WeatherManager、POIDetector 的调用。
+4. ~~**WalkSessionManager 集成**~~: ✅ 已完成，遛狗流程已集成 LandmarkManager、WeatherManager、POIDetector。
+5. 后续可以添加网红打卡点
 
 ## 📝 总结
-今日完成了 PawPrints 成就系统的四层级扩展，共新增 15 个成就。系统从简单的累积统计升级为支持地理位置检测、天气感知和复杂行为判定的智能成就系统。架构上新增了三个核心管理器（LandmarkManager、WeatherManager、POIDetector），为后续功能迭代打下了坚实基础。
+今日完成了 PawPrints 成就系统的四层级扩展，共新增 15 个成就。系统从简单的累积统计升级为支持地理位置检测、天气感知和复杂行为判定的智能成就系统。
+
+此外，完成了和风天气 (QWeather) API 的集成，替代了需要付费订阅的 WeatherKit。同时将所有新管理器（LandmarkManager、WeatherManager、POIDetector）完整集成到遛狗流程中，现在遛狗结束时会自动检测天气相关成就、景点打卡成就和复杂上下文成就。
+
+---
+*记录人: Cursor AI Assistant*
+*时间: 2026-01-28*
+
+<br>
+
+# 📅 开发日志 (Dev Log) - 2026/01/28 (续二)
+
+## 🎯 核心目标
+修复 Ready Player Me 头像显示问题，大幅扩展成就系统至 30+ 个成就，并集成 Apple Game Center 实现排行榜和成就稀有度功能。
+
+## ✅ 今日完成事项 (Completed)
+
+### 1. 🖼 Ready Player Me 头像修复
+- **JavaScript 消息监听改进**:
+  - 支持多种消息格式（字符串 URL、JSON 对象、嵌套结构）
+  - 增加 URL 导航拦截，捕获通过 URL 传递的头像信息
+  - 防止重复触发机制 (`hasExported` 标志)
+  - 详细的调试日志输出
+- **AvatarManager 升级**:
+  - 新增 `saveAvatarURLAsync()` 异步保存方法
+  - 新增 `downloadAndCacheAvatarAsync()` 确保下载完成后再关闭视图
+- **AvatarCreatorView 改进**:
+  - 新增 `isSavingAvatar` 状态，显示"正在保存头像..."加载指示器
+  - 禁止在保存过程中关闭视图 (`interactiveDismissDisabled`)
+
+### 2. 🏆 成就系统大幅扩展 (30+ 成就)
+
+#### 2.1 新增数据字段
+- `isSecret: Bool` - 隐藏成就标志
+- `rarity: AchievementRarity` - 稀有度（普通/稀有/史诗/传说）
+- `gameCenterID: String?` - Game Center 成就 ID
+- `minDistance: Double?` - 最小距离（用于"拓荒者"）
+- `timeRangeStart/End: Int?` - 时间范围（用于时段成就）
+
+#### 2.2 里程碑成就 (新增 2 个)
+- **全马选手** (42km) - 150 骨头币
+- **万里长征** (1000km) - 1000 骨头币 ⭐传说级
+
+#### 2.3 时空行者成就 (新增 4 个)
+- **闻鸡起舞** (4:00-6:00 遛狗) - 50 骨头币 ⭐稀有
+- **暗夜骑士** (23:00-02:00 遛狗) - 50 骨头币 ⭐稀有
+- **风雨无阻** (雨天 15 分钟) - 60 骨头币 ⭐稀有
+- **夏日战士** (35°C 傍晚) - 60 骨头币 ⭐稀有
+- **冰雪奇缘** 更新为 -5°C - ⭐史诗
+- **周末狂欢** (连续 4 周周末遛狗) - 100 骨头币 ⭐稀有
+
+#### 2.4 趣味彩蛋成就 (新增 7 个，全部为隐藏成就)
+- **减肥特种兵** (路过 3 家餐厅) - 60 骨头币 🔒隐藏
+- **三过家门而不入** (绕起点 3 圈) - 80 骨头币 🔒隐藏
+- **鬼打墙** (原地转圈 5 次) - 50 骨头币 🔒隐藏
+- **完美的圆** (轨迹闭环) - 80 骨头币 🔒隐藏 ⭐稀有
+- **我想回家** (返程速度 2 倍) - 60 骨头币 🔒隐藏
+- **嗅探专家** (30 分钟 <500m) - 30 骨头币 🔒隐藏
+- **长情陪伴** (累计 100 小时) - 500 骨头币 ⭐传说级
+- **拓荒者** (离家 >5km) - 80 骨头币 ⭐稀有
+- **地头蛇** (50 条不同轨迹) - 200 骨头币 ⭐史诗
+
+### 3. 🎮 Apple Game Center 集成
+
+#### 3.1 GameCenterManager 创建
+- **认证功能**: 自动弹出 Game Center 登录界面
+- **排行榜功能**:
+  - 全球榜 (global)
+  - 好友榜 (friendsOnly)
+  - 同城榜 (预留接口)
+- **成就报告**: 解锁成就时同步到 Game Center
+- **稀有度获取**: 支持从 Game Center 获取全球解锁百分比
+- **原生 UI**: 可直接打开 Game Center 排行榜/成就界面
+
+#### 3.2 LeaderboardView 创建
+- 三标签切换（全球/同城/好友）
+- 当前玩家排名卡片
+- 排行榜列表（头像、名称、分数、奖牌）
+- 下拉刷新功能
+- 未认证时显示登录引导
+
+#### 3.3 AchievementDetailView 创建
+- 成就图标和状态展示
+- 描述和进度条
+- **稀有度卡片**: 显示全球解锁率和稀有度标签
+- **首杀榜**: 预留首位达成者展示（需后端支持）
+- 奖励信息
+
+#### 3.4 AchievementListView 升级
+- 分类筛选器
+- 统计卡片（已解锁/总数/完成度）
+- 隐藏成就显示为"???"
+- 点击查看详情弹窗
+- 导航到排行榜
+
+### 4. 🔄 AchievementManager 升级
+- **WalkSessionData 扩展**:
+  - `maxDistanceFromStart`: 离起点最远距离
+  - `spinCount`: 原地转圈次数
+  - `isClosedLoop`: 是否形成闭环
+  - `returnSpeedRatio`: 返程/去程速度比
+- **新增检测逻辑**:
+  - 周末遛狗计数和连续周末检测
+  - 累计遛狗时长统计
+  - 各种新成就的检测方法
+
+### 5. 📁 新增文件清单
+| 文件 | 说明 |
+|------|------|
+| `Core/Services/GameCenterManager.swift` | Game Center 管理器 |
+| `Features/Achievement/Views/LeaderboardView.swift` | 排行榜视图 |
+| `Features/Achievement/Views/AchievementDetailView.swift` | 成就详情+列表视图 |
+
+### 6. 🔧 PetWalkApp 集成
+- 添加 `GameCenterManager` 观察
+- 主界面加载后自动认证 Game Center
+
+## 🚧 遗留/待办 (Pending)
+1. **首杀榜后端**: Game Center 不直接提供首杀数据，需要自建后端服务记录
+2. **同城榜实现**: 需要结合用户位置信息进行筛选
+3. **轨迹闭环检测**: 需要在 WalkSessionManager 中计算 `isClosedLoop`
+4. **转圈检测算法**: 需要在 WalkSessionManager 中实现 `spinCount` 计算
+5. **POI 实地测试**: 继续测试 Level 4 成就的准确性
+
+## 📝 总结
+今日完成了三项重要功能：
+
+1. **头像显示问题修复** - 通过改进 JavaScript 消息监听、添加 URL 导航拦截、以及异步等待下载完成，彻底解决了头像创建后无法显示的问题。
+
+2. **成就系统大幅扩展** - 从原有的 20 个成就扩展至 35+ 个，覆盖 7 大类别。新增了隐藏成就机制和稀有度系统，增强了收集乐趣。
+
+3. **Game Center 集成** - 实现了完整的 Game Center 集成，包括认证、排行榜（全球/好友/同城）、成就同步、稀有度显示和首杀榜预留。用户现在可以与全球玩家竞争排名。
 
 ---
 *记录人: Cursor AI Assistant*

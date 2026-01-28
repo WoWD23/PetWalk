@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import CoreLocation
 
 @MainActor
 class WalkSessionManager: ObservableObject {
@@ -16,6 +17,13 @@ class WalkSessionManager: ObservableObject {
     // 计时数据
     @Published var duration: TimeInterval = 0
     @Published var distance: Double = 0.0 // km
+    
+    // MARK: - 新增：成就系统集成
+    @Published var currentWeather: WeatherData?
+    @Published var visitedLandmarks: [Landmark] = []
+    
+    // 起始位置（用于成就检测）
+    private var startLocation: CLLocation?
     
     // 计时器
     private var timer: Timer?
@@ -42,6 +50,31 @@ class WalkSessionManager: ObservableObject {
                 self.distance = totalMeters / 1000.0 // 转换为 km
             }
             .store(in: &cancellables)
+        
+        // 新增：订阅位置更新，用于成就检测
+        locationManager.$currentLocation
+            .compactMap { $0 }
+            .receive(on: RunLoop.main)
+            .sink { [weak self] location in
+                guard let self = self, self.isWalking else { return }
+                self.onLocationUpdate(location)
+            }
+            .store(in: &cancellables)
+    }
+    
+    // MARK: - 位置更新回调（成就检测）
+    
+    private func onLocationUpdate(_ location: CLLocation) {
+        let speed = locationManager.currentSpeed
+        
+        // 检测景点打卡
+        if let landmark = LandmarkManager.shared.checkLocation(location) {
+            visitedLandmarks.append(landmark)
+            print("WalkSessionManager: 发现景点 - \(landmark.name)")
+        }
+        
+        // 更新 POI 检测器（餐厅路过检测等）
+        POIDetector.shared.updateLocation(location, speed: speed)
     }
     
     // 开始遛狗
@@ -50,10 +83,39 @@ class WalkSessionManager: ObservableObject {
         startTime = Date()
         duration = 0
         distance = 0
+        visitedLandmarks = []
+        currentWeather = nil
         
         // 启动定位
         locationManager.requestPermission()
         locationManager.startRecording()
+        
+        // 启动各管理器
+        LandmarkManager.shared.startNewSession()
+        
+        // 获取天气和初始化 POI 检测器（异步）
+        Task {
+            // 等待位置更新
+            try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5秒
+            
+            if let location = locationManager.currentLocation {
+                startLocation = location
+                
+                // 记录起点位置（用于"家门口的守护者"成就）
+                LandmarkManager.shared.recordStartLocation(location)
+                
+                // 启动 POI 检测器
+                POIDetector.shared.startSession(at: location)
+                
+                // 获取天气
+                await WeatherManager.shared.fetchWeather(for: location)
+                currentWeather = WeatherManager.shared.currentWeather
+                
+                if let weather = currentWeather {
+                    print("WalkSessionManager: 当前天气 - \(weather.weatherText), \(Int(weather.temperature))°C")
+                }
+            }
+        }
         
         // 启动计时器 (只更新时间)
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in
@@ -63,12 +125,38 @@ class WalkSessionManager: ObservableObject {
         }
     }
     
-    // 结束遛狗
-    func stopWalk() {
+    // 结束遛狗 - 返回 WalkSessionData 用于成就检测
+    func stopWalk() -> WalkSessionData {
         isWalking = false
         timer?.invalidate()
         timer = nil
         locationManager.stopRecording()
+        
+        // 结束各管理器并获取数据
+        let poiResult = POIDetector.shared.endSession()
+        LandmarkManager.shared.endSession()
+        
+        // 构建会话数据
+        let sessionData = WalkSessionData(
+            distance: distance,
+            duration: duration,
+            startTime: startTime ?? Date(),
+            averageSpeed: averageSpeed,
+            startLocation: startLocation,
+            weather: currentWeather?.asWeatherInfo,
+            passedRestaurantCount: poiResult.passedRestaurants,
+            homeLoopCount: poiResult.homeLoops
+        )
+        
+        print("WalkSessionManager: 遛狗结束 - 距离: \(String(format: "%.2f", distance))km, 时长: \(formattedDuration), 配速: \(formattedAverageSpeed)")
+        print("WalkSessionManager: 路过餐厅: \(poiResult.passedRestaurants), 绕圈: \(poiResult.homeLoops)")
+        
+        return sessionData
+    }
+    
+    // 简单结束（向后兼容）
+    func stopWalkSimple() {
+        _ = stopWalk()
     }
     
     // 每秒更新逻辑
@@ -106,5 +194,10 @@ class WalkSessionManager: ObservableObject {
         let speedMps = locationManager.currentSpeed  // m/s
         return max(0, speedMps * 3.6)  // 转换为 km/h
     }
+    
+    // MARK: - 获取遛狗开始时间
+    
+    var walkStartTime: Date {
+        return startTime ?? Date()
+    }
 }
-

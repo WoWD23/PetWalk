@@ -16,6 +16,9 @@ struct PetWalkApp: App {
     // 启动初始化管理器
     @StateObject private var initializer = AppInitializer.shared
     
+    // Game Center 管理器
+    @ObservedObject private var gameCenter = GameCenterManager.shared
+    
     var body: some Scene {
         WindowGroup {
             ZStack {
@@ -27,6 +30,10 @@ struct PetWalkApp: App {
                         // 将 ThemeManager 注入到环境中
                         .environment(\.themeManager, themeManager)
                         .transition(.opacity)
+                        .onAppear {
+                            // 初始化 Game Center
+                            gameCenter.authenticate()
+                        }
                 }
                 
                 // 启动画面（覆盖在上方）

@@ -16,6 +16,9 @@ struct AchievementView: View {
     // 选中查看详情的成就
     @State private var selectedAchievement: Achievement?
     
+    // 显示排行榜
+    @State private var showLeaderboard = false
+    
     // 计算进度
     var unlockedCount: Int {
         dataManager.userData.unlockedAchievements.count
@@ -35,6 +38,15 @@ struct AchievementView: View {
                         .font(.system(size: 34, weight: .heavy, design: .rounded))
                         .foregroundColor(.appBrown)
                     Spacer()
+                    
+                    // 排行榜按钮
+                    Button {
+                        showLeaderboard = true
+                    } label: {
+                        Image(systemName: "chart.bar.fill")
+                            .font(.system(size: 22))
+                            .foregroundColor(.appGreenMain)
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.top, 10)
@@ -54,10 +66,16 @@ struct AchievementView: View {
                             AchievementCard(
                                 achievement: achievement,
                                 isUnlocked: dataManager.userData.isAchievementUnlocked(achievement.id),
-                                progress: AchievementManager.shared.getProgress(for: achievement, userData: dataManager.userData)
+                                progress: AchievementManager.shared.getProgress(for: achievement, userData: dataManager.userData),
+                                isHintRevealed: dataManager.userData.isAchievementHintRevealed(achievement.id)
                             )
                             .onTapGesture {
-                                selectedAchievement = achievement
+                                // 隐藏成就且未揭示线索时不能点击查看详情
+                                if !achievement.isSecret || 
+                                   dataManager.userData.isAchievementUnlocked(achievement.id) ||
+                                   dataManager.userData.isAchievementHintRevealed(achievement.id) {
+                                    selectedAchievement = achievement
+                                }
                             }
                         }
                     }
@@ -72,7 +90,10 @@ struct AchievementView: View {
                 isUnlocked: dataManager.userData.isAchievementUnlocked(achievement.id),
                 progress: AchievementManager.shared.getProgress(for: achievement, userData: dataManager.userData)
             )
-            .presentationDetents([.fraction(0.5)])
+            .presentationDetents([.fraction(0.7)])
+        }
+        .sheet(isPresented: $showLeaderboard) {
+            LeaderboardView()
         }
     }
     
@@ -177,6 +198,17 @@ struct AchievementCard: View {
     let achievement: Achievement
     let isUnlocked: Bool
     let progress: (current: Int, target: Int)
+    var isHintRevealed: Bool = false  // 是否已揭示线索
+    
+    // 是否为隐藏成就且未解锁
+    private var isHiddenAndLocked: Bool {
+        achievement.isSecret && !isUnlocked
+    }
+    
+    // 是否显示模糊效果（隐藏且未揭示线索）
+    private var shouldBlur: Bool {
+        isHiddenAndLocked && !isHintRevealed
+    }
     
     var progressPercentage: Double {
         guard progress.target > 0 else { return 0 }
@@ -184,6 +216,31 @@ struct AchievementCard: View {
     }
     
     var body: some View {
+        ZStack {
+            // 主内容
+            mainContent
+                .blur(radius: shouldBlur ? 8 : 0)
+            
+            // 隐藏成就遮罩层
+            if shouldBlur {
+                hiddenOverlay
+            }
+            
+            // 已揭示线索但未解锁的边框
+            if isHintRevealed && !isUnlocked {
+                RoundedRectangle(cornerRadius: 15)
+                    .strokeBorder(
+                        Color.yellow,
+                        style: StrokeStyle(lineWidth: 2, dash: [8, 4])
+                    )
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 15))
+        .shadow(color: .black.opacity(0.05), radius: 5)
+    }
+    
+    // MARK: - 主内容
+    private var mainContent: some View {
         HStack(spacing: 15) {
             // 图标
             ZStack {
@@ -198,15 +255,32 @@ struct AchievementCard: View {
             
             // 内容
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
+                HStack(spacing: 6) {
                     Text(achievement.name)
                         .font(.headline)
                         .foregroundColor(isUnlocked ? .appBrown : .gray)
+                    
+                    // 稀有度标签
+                    if achievement.rarity != .common {
+                        Text(achievement.rarity.displayName)
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(achievement.rarity.color.opacity(0.2)))
+                            .foregroundColor(achievement.rarity.color)
+                    }
                     
                     if isUnlocked {
                         Image(systemName: "checkmark.seal.fill")
                             .font(.system(size: 14))
                             .foregroundColor(.appGreenMain)
+                    }
+                    
+                    // 已揭示线索标记
+                    if isHintRevealed && !isUnlocked {
+                        Image(systemName: "lightbulb.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(.yellow)
                     }
                 }
                 
@@ -216,7 +290,7 @@ struct AchievementCard: View {
                     .lineLimit(2)
                 
                 // 进度条
-                if !isUnlocked {
+                if !isUnlocked && !shouldBlur {
                     HStack {
                         ProgressView(value: progressPercentage)
                             .tint(achievement.category.color)
@@ -244,113 +318,42 @@ struct AchievementCard: View {
         }
         .padding()
         .background(Color.white)
-        .clipShape(RoundedRectangle(cornerRadius: 15))
-        .shadow(color: .black.opacity(0.05), radius: 5)
         .opacity(isUnlocked ? 1.0 : 0.8)
     }
-}
-
-// MARK: - 成就详情弹窗
-struct AchievementDetailView: View {
-    let achievement: Achievement
-    let isUnlocked: Bool
-    let progress: (current: Int, target: Int)
     
-    @State private var isAnimating = false
-    
-    var body: some View {
+    // MARK: - 隐藏成就遮罩
+    private var hiddenOverlay: some View {
         ZStack {
-            Color.appBackground.ignoresSafeArea()
+            // 毛玻璃背景
+            RoundedRectangle(cornerRadius: 15)
+                .fill(.ultraThinMaterial)
             
-            VStack(spacing: 20) {
-                // 图标
+            // 锁图标和提示
+            VStack(spacing: 8) {
                 ZStack {
                     Circle()
-                        .fill(isUnlocked ? achievement.category.color.opacity(0.2) : Color.gray.opacity(0.1))
-                        .frame(width: 120, height: 120)
-                        .shadow(color: isUnlocked ? achievement.category.color.opacity(0.3) : .clear, radius: 20)
+                        .fill(Color.purple.opacity(0.2))
+                        .frame(width: 50, height: 50)
                     
-                    Image(systemName: achievement.iconSymbol)
-                        .font(.system(size: 50))
-                        .foregroundColor(isUnlocked ? achievement.category.color : .gray)
-                        .scaleEffect(isAnimating ? 1.05 : 0.95)
-                        .animation(
-                            Animation.easeInOut(duration: 1.5)
-                                .repeatForever(autoreverses: true),
-                            value: isAnimating
-                        )
-                }
-                .onAppear { isAnimating = true }
-                .padding(.top, 30)
-                
-                // 名称和状态
-                VStack(spacing: 8) {
-                    HStack {
-                        Text(achievement.name)
-                            .font(.title)
-                            .fontWeight(.bold)
-                            .foregroundColor(.appBrown)
-                        
-                        if isUnlocked {
-                            Image(systemName: "checkmark.seal.fill")
-                                .font(.title2)
-                                .foregroundColor(.appGreenMain)
-                        }
-                    }
-                    
-                    Text(achievement.category.title)
-                        .font(.caption)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(achievement.category.color.opacity(0.2))
-                        .foregroundColor(achievement.category.color)
-                        .cornerRadius(8)
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 22))
+                        .foregroundColor(.purple)
                 }
                 
-                // 描述
-                Text(achievement.description)
-                    .font(.body)
-                    .multilineTextAlignment(.center)
+                Text("隐藏成就")
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .foregroundColor(.purple)
+                
+                Text("继续探索或购买线索揭示")
+                    .font(.caption2)
                     .foregroundColor(.gray)
-                    .padding(.horizontal, 30)
-                
-                // 进度或奖励
-                if isUnlocked {
-                    HStack(spacing: 5) {
-                        Text("已获得奖励")
-                            .foregroundColor(.gray)
-                        Text("🦴 +\(achievement.rewardBones)")
-                            .fontWeight(.bold)
-                            .foregroundColor(.appGreenMain)
-                    }
-                    .font(.headline)
-                } else {
-                    VStack(spacing: 8) {
-                        ProgressView(value: Double(progress.current), total: Double(progress.target))
-                            .tint(achievement.category.color)
-                            .scaleEffect(x: 1, y: 2, anchor: .center)
-                            .frame(width: 200)
-                        
-                        Text("进度: \(progress.current) / \(progress.target)")
-                            .font(.subheadline)
-                            .foregroundColor(.gray)
-                        
-                        HStack(spacing: 5) {
-                            Text("完成后获得")
-                                .foregroundColor(.gray)
-                            Text("🦴 +\(achievement.rewardBones)")
-                                .fontWeight(.bold)
-                                .foregroundColor(.appBrown)
-                        }
-                        .font(.subheadline)
-                    }
-                }
-                
-                Spacer()
             }
         }
     }
 }
+
+// AchievementDetailView 已移至 AchievementDetailView.swift，包含稀有度和首杀榜功能
 
 #Preview {
     AchievementView()

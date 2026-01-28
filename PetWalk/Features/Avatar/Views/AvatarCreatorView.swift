@@ -20,6 +20,7 @@ struct AvatarCreatorView: View {
     @State private var isLoading = true
     @State private var showError = false
     @State private var errorMessage = ""
+    @State private var isSavingAvatar = false
     
     // 检查是否有预热的 WebView 可用
     private var hasPreloadedWebView: Bool {
@@ -45,11 +46,11 @@ struct AvatarCreatorView: View {
                 .ignoresSafeArea(edges: .bottom)
                 
                 // 加载指示器
-                if isLoading {
+                if isLoading || isSavingAvatar {
                     VStack(spacing: 15) {
                         ProgressView()
                             .scaleEffect(1.5)
-                        Text(hasPreloadedWebView ? "正在准备..." : "正在加载头像编辑器...")
+                        Text(isSavingAvatar ? "正在保存头像..." : (hasPreloadedWebView ? "正在准备..." : "正在加载头像编辑器..."))
                             .font(.subheadline)
                             .foregroundColor(.gray)
                     }
@@ -68,6 +69,7 @@ struct AvatarCreatorView: View {
                         WebViewPreloader.shared.refreshPreload()
                         dismiss()
                     }
+                    .disabled(isSavingAvatar)
                 }
             }
             .alert("加载失败", isPresented: $showError) {
@@ -81,6 +83,7 @@ struct AvatarCreatorView: View {
                 Text(errorMessage)
             }
         }
+        .interactiveDismissDisabled(isSavingAvatar)
         .onDisappear {
             // 视图消失时触发重新预热
             WebViewPreloader.shared.refreshPreload()
@@ -88,14 +91,28 @@ struct AvatarCreatorView: View {
     }
     
     private func handleAvatarExported(_ avatarURL: String) {
-        // 保存头像
-        avatarManager.saveAvatarURL(avatarURL)
+        print("AvatarCreatorView: 开始保存头像 - \(avatarURL)")
         
-        // 回调
-        onAvatarCreated?(avatarURL)
+        // 显示保存中状态
+        isSavingAvatar = true
         
-        // 关闭视图
-        dismiss()
+        // 保存头像 (异步下载)
+        Task {
+            await avatarManager.saveAvatarURLAsync(avatarURL)
+            
+            // 等待图片下载完成
+            try? await Task.sleep(nanoseconds: 500_000_000)  // 0.5秒延迟确保 UI 更新
+            
+            await MainActor.run {
+                isSavingAvatar = false
+                
+                // 回调
+                onAvatarCreated?(avatarURL)
+                
+                // 关闭视图
+                dismiss()
+            }
+        }
     }
 }
 
@@ -135,6 +152,9 @@ struct ReadyPlayerMeWebView: UIViewRepresentable {
         // 启用 JavaScript
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         
+        // 允许内联媒体播放
+        configuration.allowsInlineMediaPlayback = true
+        
         // 添加消息处理器
         configuration.userContentController.add(context.coordinator, name: "readyPlayerMe")
         
@@ -161,44 +181,95 @@ struct ReadyPlayerMeWebView: UIViewRepresentable {
     // MARK: - JavaScript 注入
     
     private func injectJavaScript(into webView: WKWebView) {
+        // 改进的 JavaScript 消息监听，支持多种格式
         let js = """
-        window.addEventListener('message', function(event) {
-            // 检查是否来自 Ready Player Me
-            if (event.data && typeof event.data === 'string') {
-                try {
-                    const json = JSON.parse(event.data);
-                    if (json.source === 'readyplayerme') {
-                        // 发送消息给 Swift
-                        window.webkit.messageHandlers.readyPlayerMe.postMessage(event.data);
-                    }
-                } catch (e) {
-                    // 不是 JSON，可能是普通字符串
-                    if (event.data.includes('.glb')) {
+        (function() {
+            // 避免重复注入
+            if (window.__rpmListenerAdded) return;
+            window.__rpmListenerAdded = true;
+            
+            console.log('PetWalk: 开始监听 Ready Player Me 消息');
+            
+            // 监听所有 postMessage 消息
+            window.addEventListener('message', function(event) {
+                console.log('PetWalk: 收到消息', typeof event.data, event.data);
+                
+                // 情况1: 直接是 GLB URL 字符串
+                if (typeof event.data === 'string') {
+                    // 检查是否是 GLB URL
+                    if (event.data.includes('.glb') || event.data.includes('models.readyplayer.me')) {
+                        console.log('PetWalk: 检测到头像 URL (字符串)');
                         window.webkit.messageHandlers.readyPlayerMe.postMessage(JSON.stringify({
                             source: 'readyplayerme',
                             eventName: 'v1.avatar.exported',
                             data: { url: event.data }
                         }));
+                        return;
+                    }
+                    
+                    // 尝试解析为 JSON
+                    try {
+                        var json = JSON.parse(event.data);
+                        if (json.source === 'readyplayerme') {
+                            console.log('PetWalk: 检测到 RPM JSON 消息');
+                            window.webkit.messageHandlers.readyPlayerMe.postMessage(event.data);
+                        }
+                    } catch (e) {
+                        // 不是有效的 JSON，忽略
                     }
                 }
-            } else if (event.data && event.data.source === 'readyplayerme') {
-                window.webkit.messageHandlers.readyPlayerMe.postMessage(JSON.stringify(event.data));
-            }
-        });
-        
-        // 通知 Ready Player Me 我们已准备好接收消息
-        if (window.postMessage) {
-            window.postMessage(JSON.stringify({
-                target: 'readyplayerme',
-                type: 'subscribe',
-                eventName: 'v1.**'
-            }), '*');
-        }
+                // 情况2: 已经是对象
+                else if (typeof event.data === 'object' && event.data !== null) {
+                    // Ready Player Me 标准格式
+                    if (event.data.source === 'readyplayerme') {
+                        console.log('PetWalk: 检测到 RPM 对象消息');
+                        window.webkit.messageHandlers.readyPlayerMe.postMessage(JSON.stringify(event.data));
+                        return;
+                    }
+                    
+                    // 检查是否有 url 字段
+                    if (event.data.url && (event.data.url.includes('.glb') || event.data.url.includes('models.readyplayer.me'))) {
+                        console.log('PetWalk: 检测到头像 URL (对象)');
+                        window.webkit.messageHandlers.readyPlayerMe.postMessage(JSON.stringify({
+                            source: 'readyplayerme',
+                            eventName: 'v1.avatar.exported',
+                            data: { url: event.data.url }
+                        }));
+                        return;
+                    }
+                    
+                    // 检查 data 字段
+                    if (event.data.data && event.data.data.url) {
+                        var url = event.data.data.url;
+                        if (url.includes('.glb') || url.includes('models.readyplayer.me')) {
+                            console.log('PetWalk: 检测到头像 URL (嵌套)');
+                            window.webkit.messageHandlers.readyPlayerMe.postMessage(JSON.stringify({
+                                source: 'readyplayerme',
+                                eventName: 'v1.avatar.exported',
+                                data: { url: url }
+                            }));
+                        }
+                    }
+                }
+            }, false);
+            
+            // 订阅 Ready Player Me 事件
+            setTimeout(function() {
+                console.log('PetWalk: 发送订阅请求');
+                window.postMessage(JSON.stringify({
+                    target: 'readyplayerme',
+                    type: 'subscribe',
+                    eventName: 'v1.**'
+                }), '*');
+            }, 1000);
+        })();
         """
         
         webView.evaluateJavaScript(js) { _, error in
             if let error = error {
                 print("AvatarCreatorView: JavaScript 注入失败 - \(error)")
+            } else {
+                print("AvatarCreatorView: JavaScript 注入成功")
             }
         }
     }
@@ -206,6 +277,7 @@ struct ReadyPlayerMeWebView: UIViewRepresentable {
     // MARK: - Coordinator
     class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var parent: ReadyPlayerMeWebView
+        private var hasExported = false  // 防止重复触发
         
         init(_ parent: ReadyPlayerMeWebView) {
             self.parent = parent
@@ -242,40 +314,90 @@ struct ReadyPlayerMeWebView: UIViewRepresentable {
             }
         }
         
+        // 处理 URL 变化 - 有些版本的 RPM 会通过 URL 传递结果
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            if let url = navigationAction.request.url?.absoluteString {
+                // 检查 URL 是否包含头像信息
+                if url.contains(".glb") && url.contains("models.readyplayer.me") && !hasExported {
+                    print("AvatarCreatorView: 从 URL 检测到头像 - \(url)")
+                    hasExported = true
+                    DispatchQueue.main.async {
+                        self.parent.onAvatarExported?(url)
+                    }
+                }
+            }
+            decisionHandler(.allow)
+        }
+        
         // MARK: - WKScriptMessageHandler
         
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard message.name == "readyPlayerMe",
-                  let messageBody = message.body as? String,
-                  let data = messageBody.data(using: .utf8),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            guard message.name == "readyPlayerMe" else { return }
+            
+            print("AvatarCreatorView: 收到原始消息 - \(message.body)")
+            
+            // 尝试解析消息
+            var json: [String: Any]?
+            
+            if let messageBody = message.body as? String {
+                if let data = messageBody.data(using: .utf8) {
+                    json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                }
+            } else if let dict = message.body as? [String: Any] {
+                json = dict
+            }
+            
+            guard let parsedJson = json else {
+                print("AvatarCreatorView: 无法解析消息")
                 return
             }
             
-            print("AvatarCreatorView: 收到消息 - \(json)")
+            print("AvatarCreatorView: 解析后的消息 - \(parsedJson)")
             
-            // 检查事件类型
-            if let eventName = json["eventName"] as? String {
+            // 防止重复触发
+            guard !hasExported else {
+                print("AvatarCreatorView: 已经导出过头像，忽略重复消息")
+                return
+            }
+            
+            // 提取头像 URL
+            var avatarURL: String?
+            
+            // 检查 eventName
+            if let eventName = parsedJson["eventName"] as? String {
                 switch eventName {
                 case "v1.avatar.exported":
-                    // 头像导出完成
-                    if let eventData = json["data"] as? [String: Any],
-                       let avatarURL = eventData["url"] as? String {
-                        DispatchQueue.main.async {
-                            self.parent.onAvatarExported?(avatarURL)
-                        }
+                    if let eventData = parsedJson["data"] as? [String: Any] {
+                        avatarURL = eventData["url"] as? String
                     }
                     
                 case "v1.user.set":
-                    // 用户已登录
                     print("AvatarCreatorView: 用户已登录")
                     
                 case "v1.frame.ready":
-                    // Frame 已准备好
                     print("AvatarCreatorView: Frame 已准备好")
                     
                 default:
-                    print("AvatarCreatorView: 未知事件 - \(eventName)")
+                    print("AvatarCreatorView: 事件 - \(eventName)")
+                }
+            }
+            
+            // 直接从 data.url 提取
+            if avatarURL == nil, let data = parsedJson["data"] as? [String: Any] {
+                avatarURL = data["url"] as? String
+            }
+            
+            // 直接从 url 字段提取
+            if avatarURL == nil {
+                avatarURL = parsedJson["url"] as? String
+            }
+            
+            // 触发回调
+            if let url = avatarURL, url.contains("models.readyplayer.me") || url.contains(".glb") {
+                print("AvatarCreatorView: 成功提取头像 URL - \(url)")
+                hasExported = true
+                DispatchQueue.main.async {
+                    self.parent.onAvatarExported?(url)
                 }
             }
         }

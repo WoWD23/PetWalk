@@ -57,7 +57,7 @@ class AvatarManager: ObservableObject {
         return URL(string: renderURLString)
     }
     
-    /// 保存头像 URL 并下载图片
+    /// 保存头像 URL 并下载图片 (同步版本，用于向后兼容)
     /// - Parameter url: Ready Player Me 返回的头像 URL
     func saveAvatarURL(_ url: String) {
         var userData = DataManager.shared.userData
@@ -70,7 +70,53 @@ class AvatarManager: ObservableObject {
         downloadAndCacheAvatar(from: url)
     }
     
-    /// 下载并缓存头像图片
+    /// 保存头像 URL 并等待下载完成 (异步版本)
+    /// - Parameter url: Ready Player Me 返回的头像 URL
+    func saveAvatarURLAsync(_ url: String) async {
+        print("AvatarManager: 开始异步保存头像 - \(url)")
+        
+        // 保存 URL
+        var userData = DataManager.shared.userData
+        userData.avatarURL = url
+        DataManager.shared.updateUserData(userData)
+        hasAvatar = true
+        
+        // 异步下载图片
+        await downloadAndCacheAvatarAsync(from: url)
+    }
+    
+    /// 异步下载并缓存头像图片
+    private func downloadAndCacheAvatarAsync(from urlString: String) async {
+        guard let renderURL = getRenderURL(from: urlString) else {
+            print("AvatarManager: 无法生成渲染 URL from \(urlString)")
+            return
+        }
+        
+        print("AvatarManager: 开始下载头像图片 - \(renderURL)")
+        isLoading = true
+        
+        do {
+            let (data, response) = try await URLSession.shared.data(from: renderURL)
+            
+            if let httpResponse = response as? HTTPURLResponse {
+                print("AvatarManager: HTTP 状态码 \(httpResponse.statusCode)")
+            }
+            
+            if let image = UIImage(data: data) {
+                self.avatarImage = image
+                self.saveImageToCache(image)
+                print("AvatarManager: 头像下载成功并已缓存")
+            } else {
+                print("AvatarManager: 无法将数据转换为图片")
+            }
+        } catch {
+            print("AvatarManager: 下载头像失败 - \(error)")
+        }
+        
+        isLoading = false
+    }
+    
+    /// 下载并缓存头像图片 (Combine 版本)
     private func downloadAndCacheAvatar(from urlString: String) {
         guard let renderURL = getRenderURL(from: urlString) else {
             print("AvatarManager: 无法生成渲染 URL")
