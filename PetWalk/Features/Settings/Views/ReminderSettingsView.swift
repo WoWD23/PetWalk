@@ -340,7 +340,8 @@ struct SettingsView: View {
     @Environment(\.dismiss) var dismiss
     
     @State private var showReminderSettings = false
-    @State private var showEditProfile = false
+    @State private var showEditProfile = false // This might be missing definition of EditProfileView elsewhere, but keeping for now as placeholder
+    @State private var showPetProfileSetup = false
     @State private var showAbout = false
     
     var body: some View {
@@ -369,11 +370,10 @@ struct SettingsView: View {
                         Text("通知")
                     }
                     
-                    // 个人资料
+                    // 个人资料 & 宠物档案
                     Section {
+                        // 基础称呼 (EditProfileView)
                         Button {
-                            // 由于使用了 sheet，这里需要一个新的 state 变量，或者重用现有的机制
-                            // 为了简单起见，我们在当前 View 增加一个状态变量
                             showEditProfile = true
                         } label: {
                             SettingsRow(
@@ -383,8 +383,24 @@ struct SettingsView: View {
                                 subtitle: "\(dataManager.userData.petName) & \(dataManager.userData.ownerNickname)"
                             )
                         }
+                        
+                        // 宠物档案 (PetProfileSetupView)
+                        NavigationLink(
+                            destination: PetProfileSetupView(onComplete: {
+                                showPetProfileSetup = false
+                            }),
+                            isActive: $showPetProfileSetup
+                        ) {
+                            SettingsRow(
+                                icon: "doc.text.fill",
+                                iconColor: .appBrown,
+                                title: "宠物档案 (AI 狗设)",
+                                subtitle: dataManager.userData.petProfile.breed.isEmpty ? "未设置" : dataManager.userData.petProfile.breed,
+                                showChevron: false // NavigationLink adds its own chevron
+                            )
+                        }
                     } header: {
-                        Text("个人资料")
+                        Text("档案管理")
                     }
                     
                     // 数据管理
@@ -438,9 +454,6 @@ struct SettingsView: View {
             .sheet(isPresented: $showReminderSettings) {
                 ReminderSettingsView()
             }
-            .sheet(isPresented: $showEditProfile) {
-                EditProfileView()
-            }
         }
     }
 }
@@ -451,6 +464,7 @@ struct SettingsRow: View {
     let iconColor: Color
     let title: String
     let subtitle: String
+    var showChevron: Bool = true // Default to true for backward compatibility
     
     var body: some View {
         HStack(spacing: 15) {
@@ -472,9 +486,11 @@ struct SettingsRow: View {
                     .foregroundColor(.gray)
             }
             
-            Image(systemName: "chevron.right")
-                .font(.caption)
-                .foregroundColor(.gray.opacity(0.5))
+            if showChevron {
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundColor(.gray.opacity(0.5))
+            }
         }
         .contentShape(Rectangle())
     }

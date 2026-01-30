@@ -29,9 +29,9 @@ struct PetWalkApp: App {
     var body: some Scene {
         WindowGroup {
             ZStack {
-                // 主界面（在启动画面下方预先加载）
                 if initializer.isReady {
-                    if dataManager.userData.hasCompletedOnboarding {
+                    // Force onboarding if pet profile is not set (e.g. migration for old users)
+                    if dataManager.userData.hasCompletedOnboarding && !dataManager.userData.petProfile.breed.isEmpty {
                         MainTabView()
                             // 使用主题 ID 作为视图标识，主题变化时强制刷新
                             .id(themeManager.currentTheme.id)

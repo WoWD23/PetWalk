@@ -39,6 +39,12 @@ struct WalkSummaryView: View {
     @State private var showAchievementPopup = false
     @State private var currentAchievementIndex = 0
     
+    // AI Diary State
+    @State private var aiDiaryContent: String = "" // Displayed text
+    @State private var fullDiaryContent: String = "" // Full text for saving
+    @State private var isGeneratingDiary = false
+    @State private var diaryError: String? = nil
+    
     // 初始化
     init(sessionData: WalkSessionData, routeCoordinates: [RoutePoint], onFinish: @escaping () -> Void) {
         self.sessionData = sessionData
@@ -140,7 +146,56 @@ struct WalkSummaryView: View {
                         }
                     }
                     .padding(.horizontal)
+                    .padding(.horizontal)
                     .transition(.scale)
+                    
+                    // 2.8 AI 日记展示
+                    VStack(alignment: .leading, spacing: 15) {
+                        HStack {
+                            Text("🐶 狗狗日记")
+                                .font(.headline)
+                                .foregroundColor(.appBrown)
+                            
+                            if isGeneratingDiary {
+                                ProgressView()
+                                    .scaleEffect(0.8)
+                            }
+                        }
+                        
+                        ZStack(alignment: .topLeading) {
+                            RoundedRectangle(cornerRadius: 15)
+                                .fill(Color.white)
+                                .shadow(color: .black.opacity(0.05), radius: 5)
+                            
+                            if !aiDiaryContent.isEmpty {
+                                Text(aiDiaryContent)
+                                    .font(.system(.body, design: .serif))
+                                    .foregroundColor(.primary)
+                                    .padding()
+                                    .lineSpacing(4)
+                            } else if isGeneratingDiary {
+                                Text("正在从狗狗视角回忆这次散步...")
+                                    .italic()
+                                    .foregroundColor(.gray)
+                                    .padding()
+                            } else if let error = diaryError {
+                                HStack {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .foregroundColor(.orange)
+                                    Text("日记生成失败: \(error)")
+                                }
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                                .padding()
+                            } else {
+                                Text("日记准备中...")
+                                    .foregroundColor(.gray.opacity(0.5))
+                                    .padding()
+                            }
+                        }
+                        .frame(minHeight: 120) // Ensure some height
+                    }
+                    .padding(.horizontal)
                     
                     // 3. 心情选择
                     VStack(alignment: .leading, spacing: 15) {
@@ -263,6 +318,54 @@ struct WalkSummaryView: View {
         }
         .onAppear {
             calculateRewards()
+            generateAiDiary()
+        }
+    }
+    
+    // 生成 AI 日记
+    private func generateAiDiary() {
+        guard !dataManager.userData.petProfile.breed.isEmpty else { return } // No profile, no diary
+        
+        isGeneratingDiary = true
+        diaryError = nil
+        aiDiaryContent = ""
+        fullDiaryContent = ""
+        
+        Task {
+            do {
+                let profile = dataManager.userData.petProfile
+                let petName = dataManager.userData.petName
+                let ownerName = dataManager.userData.ownerNickname
+                
+                let systemPrompt = DiaryPromptBuilder.buildSystemPrompt(profile: profile, name: petName, ownerName: ownerName)
+                let userPrompt = DiaryPromptBuilder.buildUserPrompt(sessionData: sessionData)
+                
+                let content = try await LLMService.shared.generateDiary(systemPrompt: systemPrompt, userPrompt: userPrompt)
+                
+                await MainActor.run {
+                    self.fullDiaryContent = content
+                    self.isGeneratingDiary = false
+                    // Start Typewriter Effect
+                    typeWriterEffect(content: content)
+                }
+            } catch {
+                await MainActor.run {
+                    self.diaryError = error.localizedDescription
+                    self.isGeneratingDiary = false
+                }
+            }
+        }
+    }
+    
+    // 打字机效果
+    private func typeWriterEffect(content: String) {
+        Task {
+            for char in content {
+                await MainActor.run {
+                    self.aiDiaryContent.append(char)
+                }
+                try? await Task.sleep(nanoseconds: 30_000_000) // 0.03s per char
+            }
         }
     }
     
@@ -347,7 +450,10 @@ struct WalkSummaryView: View {
             imageName: imageName,
             route: routeCoordinates,
             itemsFound: nil, // 不再使用物品系统
-            bonesEarned: earnedBones
+            bonesEarned: earnedBones,
+            isCloudWalk: false,
+            aiDiary: fullDiaryContent.isEmpty ? (aiDiaryContent.isEmpty ? nil : aiDiaryContent) : fullDiaryContent,
+            aiDiaryGeneratedAt: fullDiaryContent.isEmpty && aiDiaryContent.isEmpty ? nil : Date()
         )
         
         // 3. 存入 DataManager

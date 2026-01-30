@@ -33,4 +33,8 @@ struct WalkRecord: Identifiable, Codable {
     
     // Cloud Walk (v1.2)
     var isCloudWalk: Bool?    // 是否为云遛狗记录
+    
+    // AI Diary (v1.3)
+    var aiDiary: String?      // AI 生成的日记内容
+    var aiDiaryGeneratedAt: Date? // 生成时间
 }

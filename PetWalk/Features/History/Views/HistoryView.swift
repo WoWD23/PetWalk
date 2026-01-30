@@ -22,6 +22,17 @@ struct HistoryView: View {
     @State private var showStatsDetail = false
     @State private var selectedStatsType: StatsType = .distance
     
+    // 选中记录以显示详情 (日历/热力图点击)
+    @State private var selectedRecord: WalkRecord? = nil
+    
+
+    
+    // 选中记录以仅显示日记 (日记模式点击)
+    @State private var readingDiaryRecord: WalkRecord? = nil
+    
+    // 多记录选择 (当一天有多次记录时)
+    @State private var dailySelection: DailySelection? = nil
+    
     // 设置页
     @State private var showSettings = false
     
@@ -70,11 +81,24 @@ struct HistoryView: View {
                         VStack(spacing: 25) {
                             
                             // A. 升级版日历卡片 (传入 live data)
-                            PhotoCalendarCard(records: dataManager.records) { imageName in
-                                // 点击照片的回调：打开大图
-                                self.selectedPhoto = imageName
-                                self.isPhotoViewerPresented = true
-                            }
+
+                            PhotoCalendarCard(
+                                records: dataManager.records,
+                                onRecordTap: { records in
+                                    if records.count == 1, let first = records.first {
+                                        self.selectedRecord = first
+                                    } else if records.count > 1 {
+                                        self.dailySelection = DailySelection(records: records, isDiaryMode: false)
+                                    }
+                                },
+                                onDiaryTap: { records in
+                                    if records.count == 1, let first = records.first {
+                                        self.readingDiaryRecord = first
+                                    } else if records.count > 1 {
+                                        self.dailySelection = DailySelection(records: records, isDiaryMode: true)
+                                    }
+                                }
+                            )
                             
                             // B. 动态统计数据 (实时计算)
                             HStack(spacing: 15) {
@@ -136,6 +160,23 @@ struct HistoryView: View {
                             .padding(.bottom, 100) // 防止被底部 TabBar 遮挡
                         }
                         .padding(.top, 10)
+                }
+                .sheet(item: $selectedRecord) { record in
+                    NavigationView {
+                        WalkDetailView(record: record)
+                            .navigationBarItems(leading: Button("关闭") {
+                                selectedRecord = nil
+                            })
+                    }
+                    }
+                }
+
+                .sheet(item: $readingDiaryRecord) { record in
+                    DiaryReadingView(record: record)
+                }
+                .sheet(item: $dailySelection) { selection in
+                    NavigationView {
+                        DailyRecordListView(selection: selection)
                     }
                 }
                 
@@ -189,12 +230,40 @@ struct HistoryView: View {
 
 // MARK: - 🧩 子组件 (Subviews)
 
-// 1. 双面日历卡片容器 (支持翻转)
+// 0. 日历模式枚举
+enum CalendarMode {
+    case photo
+    case diary
+    case heatmap
+    
+    var title: String {
+        switch self {
+        case .photo: return "本月独家记忆"
+        case .diary: return "狗狗心情日记"
+        case .heatmap: return "运动热力图"
+        }
+    }
+    
+    var next: CalendarMode {
+        switch self {
+        case .photo: return .diary
+        case .diary: return .heatmap
+        case .heatmap: return .photo
+        }
+    }
+}
+
+// 1. 三态日历卡片容器
+
+// 1. 三态日历卡片容器
 struct PhotoCalendarCard: View {
     let records: [WalkRecord]
-    var onPhotoTap: (String) -> Void
+    var onRecordTap: ([WalkRecord]) -> Void
+    var onDiaryTap: ([WalkRecord]) -> Void
     
-    @State private var isFlipped = false
+
+    
+    @State private var mode: CalendarMode = .photo
     
     // 辅助：加载本地图片
     func loadLocalImage(named name: String) -> UIImage? {
@@ -214,16 +283,16 @@ struct PhotoCalendarCard: View {
         VStack(alignment: .leading, spacing: 15) {
             // Header
             HStack {
-                Text(isFlipped ? "狗狗热力图" : "本月独家记忆")
+                Text(mode.title)
                     .font(.system(size: 16, weight: .bold, design: .rounded))
                     .foregroundColor(.appBrown)
                 
                 Spacer()
                 
-                // 翻转按钮
+                // 切换按钮
                 Button(action: {
-                    withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
-                        isFlipped.toggle()
+                    withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+                        mode = mode.next
                     }
                 }) {
                     Image(systemName: "arrow.triangle.2.circlepath")
@@ -245,16 +314,20 @@ struct PhotoCalendarCard: View {
             
             // Content Area
             ZStack {
-                if isFlipped {
-                    // 背面：纯色热力图
-                    HeatmapGridView(records: records)
-                        .rotation3DEffect(.degrees(180), axis: (x: 0, y: 1, z: 0)) // 修正镜像
-                } else {
-                    // 正面：照片日历
-                    PhotoGridView(records: records, loadLocalImage: loadLocalImage, onPhotoTap: onPhotoTap)
+                switch mode {
+                case .photo:
+                    PhotoGridView(records: records, loadLocalImage: loadLocalImage, onRecordTap: onRecordTap)
+                        .transition(.opacity)
+                case .diary:
+                    DiaryGridView(records: records, onRecordTap: onDiaryTap)
+                        .transition(.opacity)
+                case .heatmap:
+                    HeatmapGridView(records: records, onRecordTap: onRecordTap)
+                        .transition(.opacity)
                 }
             }
-            .rotation3DEffect(.degrees(isFlipped ? 180 : 0), axis: (x: 0, y: 1, z: 0))
+            // 移除 3D 翻转效果，改为淡入淡出，因为是三态切换
+            .animation(.easeInOut(duration: 0.3), value: mode)
         }
         .padding(20)
         .background(Color.white)
@@ -264,16 +337,17 @@ struct PhotoCalendarCard: View {
     }
 }
 
+
 // 正面：照片网格
 struct PhotoGridView: View {
     let records: [WalkRecord]
     let loadLocalImage: (String) -> UIImage?
-    let onPhotoTap: (String) -> Void
+    let onRecordTap: ([WalkRecord]) -> Void
     
     let columns = Array(repeating: GridItem(.flexible()), count: 7)
     
-    func getRecord(for day: Int) -> WalkRecord? {
-        records.first { $0.day == day }
+    func getRecords(for day: Int) -> [WalkRecord] {
+        records.filter { $0.day == day }
     }
     
     var body: some View {
@@ -283,28 +357,49 @@ struct PhotoGridView: View {
             }
             
             ForEach(1...30, id: \.self) { day in
-                let record = getRecord(for: day)
+                let dailyRecords = getRecords(for: day)
+                let record = dailyRecords.last // 显示最新的
+                
                 ZStack {
                     if let record = record {
+                        // 有记录
                         if let imageName = record.imageName, !imageName.isEmpty {
-                            Group {
-                                if let uiImage = loadLocalImage(imageName) {
-                                    Image(uiImage: uiImage).resizable().scaledToFill()
+                            // 有照片
+                            if let uiImage = loadLocalImage(imageName) {
+                                Image(uiImage: uiImage).resizable().scaledToFill()
+                                    .frame(width: 36, height: 36)
+                                    .clipShape(Circle())
+                            } else {
+                                Color.gray
+                                    .frame(width: 36, height: 36)
+                                    .clipShape(Circle())
+                            }
+                        } else {
+                            // 无照片，显示图标
+                            ZStack {
+                                Circle().fill(Color.appGreenMain).frame(height: 36)
+                                if let diary = record.aiDiary, !diary.isEmpty {
+                                    Image(systemName: "book.closed.fill")
+                                        .font(.system(size: 14))
+                                        .foregroundColor(.white)
                                 } else {
-                                    Color.gray
+                                    Image(systemName: "pawprint.fill")
+                                        .font(.system(size: 16))
+                                        .foregroundColor(.white)
                                 }
                             }
-                            .frame(width: 36, height: 36)
-                            .clipShape(Circle())
-                            .overlay(Circle().stroke(Color.appGreenMain, lineWidth: 2))
-                            .onTapGesture { withAnimation { onPhotoTap(imageName) } }
-                        } else {
-                            Circle().fill(Color.appGreenMain).frame(height: 36)
-                            Image(systemName: "pawprint.fill").font(.system(size: 16)).foregroundColor(.white)
                         }
+                        
+
                     } else {
+                        // 无记录
                         Circle().fill(Color.gray.opacity(0.1)).frame(height: 36)
                         Text("\(day)").font(.system(size: 10)).foregroundColor(.gray)
+                    }
+                }
+                .onTapGesture {
+                    if !dailyRecords.isEmpty {
+                        withAnimation { onRecordTap(dailyRecords) }
                     }
                 }
             }
@@ -315,6 +410,9 @@ struct PhotoGridView: View {
 // 背面：纯色热力图
 struct HeatmapGridView: View {
     let records: [WalkRecord]
+    // 增加点击回调
+    var onRecordTap: (([WalkRecord]) -> Void)? = nil
+    
     let columns = Array(repeating: GridItem(.flexible()), count: 7)
     
     // 获取某天的总距离
@@ -350,6 +448,13 @@ struct HeatmapGridView: View {
                             .foregroundColor(distance > 3.0 ? .white : .appBrown)
                     } else {
                         Text("\(day)").font(.system(size: 10)).foregroundColor(.gray)
+                    }
+                }
+                .onTapGesture {
+                    // 找到当天的所有记录并回调
+                    let dailyRecords = records.filter { $0.day == day }
+                    if !dailyRecords.isEmpty {
+                        onRecordTap?(dailyRecords)
                     }
                 }
             }
@@ -427,6 +532,10 @@ struct WalkRecordCard: View {
                         Label("有照片", systemImage: "photo.fill")
                             .foregroundColor(.orange)
                     }
+                    if let diary = record.aiDiary, !diary.isEmpty {
+                        Label("有日记", systemImage: "book.closed.fill")
+                            .foregroundColor(.appBrown)
+                    }
                 }
                 .font(.caption2)
                 .foregroundColor(.gray)
@@ -449,6 +558,174 @@ struct WalkRecordCard: View {
         .background(Color.white)
         .cornerRadius(20)
         .shadow(color: Color.black.opacity(0.03), radius: 5, x: 0, y: 2)
+    }
+}
+
+// 新增：日记模式网格
+struct DiaryGridView: View {
+    let records: [WalkRecord]
+    var onRecordTap: (([WalkRecord]) -> Void)? = nil
+    
+    let columns = Array(repeating: GridItem(.flexible()), count: 7)
+    
+    func getRecords(for day: Int) -> [WalkRecord] {
+        records.filter { $0.day == day }
+    }
+    
+    var body: some View {
+        LazyVGrid(columns: columns, spacing: 10) {
+            ForEach(["日", "一", "二", "三", "四", "五", "六"], id: \.self) { day in
+                Text(day).font(.system(size: 10, weight: .bold)).foregroundColor(.appBrown.opacity(0.4))
+            }
+            
+            ForEach(1...30, id: \.self) { day in
+                let dailyRecords = getRecords(for: day)
+                let hasDiary = dailyRecords.contains { $0.aiDiary != nil && !$0.aiDiary!.isEmpty }
+                
+                ZStack {
+                    if hasDiary {
+                        // 有日记
+                        // 根据日记数量决定颜色深浅：数量越多颜色越深
+                        let opacity = min(0.1 + Double(dailyRecords.count - 1) * 0.15, 0.5)
+                        Circle()
+                            .fill(Color.appBrown.opacity(opacity))
+                            .frame(height: 36)
+                        
+                        Image(systemName: "book.closed.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.appBrown)
+                    } else if !dailyRecords.isEmpty {
+                        // 有记录但没日记
+                         Circle()
+                            .fill(Color.gray.opacity(0.1))
+                            .frame(height: 36)
+                        Image(systemName: "pawprint.fill")
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray.opacity(0.5))
+                    } else {
+                        // 无记录
+                        Circle().fill(Color.gray.opacity(0.05)).frame(height: 36)
+                        Text("\(day)").font(.system(size: 10)).foregroundColor(.gray.opacity(0.5))
+                    }
+                }
+                .onTapGesture {
+                    if hasDiary {
+                        onRecordTap?(dailyRecords)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// 辅助结构：多记录选择
+struct DailySelection: Identifiable {
+    let id = UUID()
+    let records: [WalkRecord]
+    let isDiaryMode: Bool
+}
+
+// 新增：每日记录清单（当一天多次遛狗时）
+struct DailyRecordListView: View {
+    let selection: DailySelection
+    @Environment(\.presentationMode) var presentationMode
+    
+    var body: some View {
+        List {
+            ForEach(selection.records) { record in
+                NavigationLink(destination: destinationView(for: record)) {
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(record.time)
+                                .font(.headline)
+                                .foregroundColor(.appBrown)
+                            Text("\(String(format: "%.1f", record.distance)) km • \(record.duration) min")
+                                .font(.caption)
+                                .foregroundColor(.gray)
+                        }
+                        
+                        Spacer()
+                        
+                        if let diary = record.aiDiary, !diary.isEmpty {
+                            Image(systemName: "book.closed.fill")
+                                .foregroundColor(.appBrown)
+                        } else {
+                            Image(systemName: "pawprint.fill")
+                                .foregroundColor(.gray.opacity(0.5))
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .navigationTitle(selection.isDiaryMode ? "选择日记" : "选择记录")
+        .navigationBarItems(trailing: Button("关闭") {
+            presentationMode.wrappedValue.dismiss()
+        })
+    }
+    
+    @ViewBuilder
+    func destinationView(for record: WalkRecord) -> some View {
+        if selection.isDiaryMode {
+            DiaryReadingView(record: record)
+        } else {
+            WalkDetailView(record: record)
+        }
+    }
+}
+
+// 新增：专注日记阅读视图
+struct DiaryReadingView: View {
+    let record: WalkRecord
+    @Environment(\.presentationMode) var presentationMode
+    
+    var body: some View {
+        ZStack {
+            Color.appBackground.ignoresSafeArea()
+            
+            VStack {
+                // Header
+                HStack {
+                    Spacer()
+                    Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title2)
+                            .foregroundColor(.gray)
+                    }
+                    .padding()
+                }
+                
+                ScrollView {
+                    VStack(spacing: 20) {
+                        Text(record.date)
+                            .font(.subheadline)
+                            .foregroundColor(.gray)
+                        
+                        Text("🐶 狗狗日记")
+                            .font(.title2)
+                            .bold()
+                            .foregroundColor(.appBrown)
+                        
+                        if let diary = record.aiDiary {
+                            Text(diary)
+                                .font(.system(.body, design: .serif))
+                                .lineSpacing(8)
+                                .foregroundColor(.primary)
+                                .padding(30)
+                                .background(Color.white)
+                                .cornerRadius(20)
+                                .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 5)
+                        } else {
+                            Text("这天没有写日记哦")
+                                .italic()
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    .padding()
+                    .padding(.bottom, 50)
+                }
+            }
+        }
     }
 }
 

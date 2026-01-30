@@ -64,6 +64,31 @@ struct WalkDetailView: View {
                 }
                 .padding(.horizontal)
                     
+                    // 2.5 AI 日记回顾
+                    if let diary = record.aiDiary, !diary.isEmpty {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text("🐶 狗狗日记")
+                                    .font(.headline)
+                                    .foregroundColor(.appBrown)
+                                Spacer()
+                                Text(record.aiDiaryGeneratedAt?.formatted(date: .omitted, time: .shortened) ?? "")
+                                    .font(.caption2)
+                                    .foregroundColor(.gray)
+                            }
+                            
+                            Text(diary)
+                                .font(.system(.body, design: .serif))
+                                .foregroundColor(.primary)
+                                .padding()
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.white)
+                                .cornerRadius(15)
+                                .shadow(color: .black.opacity(0.05), radius: 5)
+                        }
+                        .padding(.horizontal)
+                    }
+                    
                     // 3. 照片回顾
                     if let imageName = record.imageName, !imageName.isEmpty {
                         VStack(alignment: .leading) {
