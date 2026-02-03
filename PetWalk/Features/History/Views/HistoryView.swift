@@ -278,8 +278,13 @@ struct PhotoCalendarCard: View {
         return nil
     }
     
-    // 辅助：日期计算
-    var calendar: Calendar { Calendar.current }
+    // 使用固定配置的 Calendar，确保日期计算一致
+    var calendar: Calendar {
+        var cal = Calendar(identifier: .gregorian)
+        cal.firstWeekday = 1 // 周日为一周的第一天
+        cal.locale = Locale(identifier: "zh_CN")
+        return cal
+    }
     
     var year: Int { calendar.component(.year, from: currentMonth) }
     var month: Int { calendar.component(.month, from: currentMonth) }
@@ -345,8 +350,8 @@ struct PhotoCalendarCard: View {
                             .foregroundColor(.appBrown)
                     }
                     // 只有当不是当月时，禁止向后切换? 或者允许查看未来? 目前不做限制
-                    .disabled(Calendar.current.isDate(currentMonth, equalTo: Date(), toGranularity: .month))
-                    .opacity(Calendar.current.isDate(currentMonth, equalTo: Date(), toGranularity: .month) ? 0.3 : 1)
+                    .disabled(calendar.isDate(currentMonth, equalTo: Date(), toGranularity: .month))
+                    .opacity(calendar.isDate(currentMonth, equalTo: Date(), toGranularity: .month) ? 0.3 : 1)
                 }
                 
                 Spacer()
@@ -398,6 +403,19 @@ struct PhotoCalendarCard: View {
 }
 
 
+// 日历格子类型
+enum CalendarCell: Identifiable {
+    case empty(index: Int)
+    case day(day: Int)
+    
+    var id: String {
+        switch self {
+        case .empty(let index): return "empty_\(index)"
+        case .day(let day): return "day_\(day)"
+        }
+    }
+}
+
 // 正面：照片网格
 struct PhotoGridView: View {
     let records: [WalkRecord]
@@ -407,21 +425,44 @@ struct PhotoGridView: View {
     
     let columns = Array(repeating: GridItem(.flexible()), count: 7)
     
+    // 使用固定配置的 Calendar，确保表头和偏移量计算一致
+    private var fixedCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.firstWeekday = 1 // 周日为一周的第一天
+        calendar.locale = Locale(identifier: "zh_CN")
+        return calendar
+    }
+    
     // 获取当月天数
     var daysInMonth: Int {
-        let range = Calendar.current.range(of: .day, in: .month, for: currentMonth)!
+        let range = fixedCalendar.range(of: .day, in: .month, for: currentMonth)!
         return range.count
     }
     
     // 获取当月第一天是星期几 (0=周日, 1=周一...)
     var firstWeekdayOffset: Int {
-        let components = Calendar.current.dateComponents([.year, .month], from: currentMonth)
-        let firstDay = Calendar.current.date(from: components)!
-        let weekday = Calendar.current.component(.weekday, from: firstDay)
+        var components = fixedCalendar.dateComponents([.year, .month], from: currentMonth)
+        components.day = 1 // 明确设置为1号
+        let firstDay = fixedCalendar.date(from: components)!
+        let weekday = fixedCalendar.component(.weekday, from: firstDay)
         // weekday: 1=Sunday, 2=Monday, ..., 7=Saturday
         // 我们的表头是 ["日", "一", "二", "三", "四", "五", "六"]
         // 所以 Sunday(1) -> offset 0, Monday(2) -> offset 1, etc.
         return weekday - 1
+    }
+    
+    // 构建日历格子数组，避免 ForEach ID 冲突
+    var calendarCells: [CalendarCell] {
+        var cells: [CalendarCell] = []
+        // 添加空白格子
+        for i in 0..<firstWeekdayOffset {
+            cells.append(.empty(index: i))
+        }
+        // 添加日期格子
+        for day in 1...daysInMonth {
+            cells.append(.day(day: day))
+        }
+        return cells
     }
     
     func getRecords(for day: Int) -> [WalkRecord] {
@@ -430,58 +471,59 @@ struct PhotoGridView: View {
     
     var body: some View {
         LazyVGrid(columns: columns, spacing: 10) {
+            // 表头
             ForEach(["日", "一", "二", "三", "四", "五", "六"], id: \.self) { day in
                 Text(day).font(.system(size: 10, weight: .bold)).foregroundColor(.appBrown.opacity(0.4))
             }
             
-            // 填充前面的空白
-            ForEach(0..<firstWeekdayOffset, id: \.self) { _ in
-                Color.clear.frame(height: 36)
-            }
-            
-            // 渲染动态天数
-            ForEach(1...daysInMonth, id: \.self) { day in
-                let dailyRecords = getRecords(for: day)
-                let record = dailyRecords.last // 显示最新的
-                
-                ZStack {
-                    if let record = record {
-                        // 有记录
-                        if let imageName = record.imageName, !imageName.isEmpty {
-                            // 有照片
-                            if let uiImage = loadLocalImage(imageName) {
-                                Image(uiImage: uiImage).resizable().scaledToFill()
-                                    .frame(width: 36, height: 36)
-                                    .clipShape(Circle())
-                            } else {
-                                Color.gray
-                                    .frame(width: 36, height: 36)
-                                    .clipShape(Circle())
-                            }
-                        } else {
-                            // 无照片，显示图标
-                            ZStack {
-                                Circle().fill(Color.appGreenMain).frame(height: 36)
-                                if let diary = record.aiDiary, !diary.isEmpty {
-                                    Image(systemName: "book.closed.fill")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.white)
+            // 日历格子（空白 + 日期）
+            ForEach(calendarCells) { cell in
+                switch cell {
+                case .empty:
+                    Color.clear.frame(height: 36)
+                case .day(let day):
+                    let dailyRecords = getRecords(for: day)
+                    let record = dailyRecords.last // 显示最新的
+                    
+                    ZStack {
+                        if let record = record {
+                            // 有记录
+                            if let imageName = record.imageName, !imageName.isEmpty {
+                                // 有照片
+                                if let uiImage = loadLocalImage(imageName) {
+                                    Image(uiImage: uiImage).resizable().scaledToFill()
+                                        .frame(width: 36, height: 36)
+                                        .clipShape(Circle())
                                 } else {
-                                    Image(systemName: "pawprint.fill")
-                                        .font(.system(size: 16))
-                                        .foregroundColor(.white)
+                                    Color.gray
+                                        .frame(width: 36, height: 36)
+                                        .clipShape(Circle())
+                                }
+                            } else {
+                                // 无照片，显示图标
+                                ZStack {
+                                    Circle().fill(Color.appGreenMain).frame(height: 36)
+                                    if let diary = record.aiDiary, !diary.isEmpty {
+                                        Image(systemName: "book.closed.fill")
+                                            .font(.system(size: 14))
+                                            .foregroundColor(.white)
+                                    } else {
+                                        Image(systemName: "pawprint.fill")
+                                            .font(.system(size: 16))
+                                            .foregroundColor(.white)
+                                    }
                                 }
                             }
+                        } else {
+                            // 无记录
+                            Circle().fill(Color.gray.opacity(0.1)).frame(height: 36)
+                            Text("\(day)").font(.system(size: 10)).foregroundColor(.gray)
                         }
-                    } else {
-                        // 无记录
-                        Circle().fill(Color.gray.opacity(0.1)).frame(height: 36)
-                        Text("\(day)").font(.system(size: 10)).foregroundColor(.gray)
                     }
-                }
-                .onTapGesture {
-                    if !dailyRecords.isEmpty {
-                        withAnimation { onRecordTap(dailyRecords) }
+                    .onTapGesture {
+                        if !dailyRecords.isEmpty {
+                            withAnimation { onRecordTap(dailyRecords) }
+                        }
                     }
                 }
             }
@@ -498,15 +540,36 @@ struct HeatmapGridView: View {
     
     let columns = Array(repeating: GridItem(.flexible()), count: 7)
     
+    // 使用固定配置的 Calendar，确保表头和偏移量计算一致
+    private var fixedCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.firstWeekday = 1 // 周日为一周的第一天
+        calendar.locale = Locale(identifier: "zh_CN")
+        return calendar
+    }
+    
     var daysInMonth: Int {
-        Calendar.current.range(of: .day, in: .month, for: currentMonth)!.count
+        fixedCalendar.range(of: .day, in: .month, for: currentMonth)!.count
     }
     
     var firstWeekdayOffset: Int {
-        let components = Calendar.current.dateComponents([.year, .month], from: currentMonth)
-        let firstDay = Calendar.current.date(from: components)!
-        let weekday = Calendar.current.component(.weekday, from: firstDay)
+        var components = fixedCalendar.dateComponents([.year, .month], from: currentMonth)
+        components.day = 1 // 明确设置为1号
+        let firstDay = fixedCalendar.date(from: components)!
+        let weekday = fixedCalendar.component(.weekday, from: firstDay)
         return weekday - 1
+    }
+    
+    // 构建日历格子数组，避免 ForEach ID 冲突
+    var calendarCells: [CalendarCell] {
+        var cells: [CalendarCell] = []
+        for i in 0..<firstWeekdayOffset {
+            cells.append(.empty(index: i))
+        }
+        for day in 1...daysInMonth {
+            cells.append(.day(day: day))
+        }
+        return cells
     }
     
     // 获取某天的总距离
@@ -528,31 +591,32 @@ struct HeatmapGridView: View {
                 Text(day).font(.system(size: 10, weight: .bold)).foregroundColor(.appBrown.opacity(0.4))
             }
             
-            ForEach(0..<firstWeekdayOffset, id: \.self) { _ in
-                Color.clear.frame(height: 36)
-            }
-            
-            ForEach(1...daysInMonth, id: \.self) { day in
-                let distance = getDailyDistance(day: day)
-                
-                ZStack {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(getColor(for: distance))
-                        .frame(height: 36)
+            ForEach(calendarCells) { cell in
+                switch cell {
+                case .empty:
+                    Color.clear.frame(height: 36)
+                case .day(let day):
+                    let distance = getDailyDistance(day: day)
                     
-                    if distance > 0 {
-                        Text(String(format: "%.1f", distance))
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundColor(distance > 3.0 ? .white : .appBrown)
-                    } else {
-                        Text("\(day)").font(.system(size: 10)).foregroundColor(.gray)
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(getColor(for: distance))
+                            .frame(height: 36)
+                        
+                        if distance > 0 {
+                            Text(String(format: "%.1f", distance))
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundColor(distance > 3.0 ? .white : .appBrown)
+                        } else {
+                            Text("\(day)").font(.system(size: 10)).foregroundColor(.gray)
+                        }
                     }
-                }
-                .onTapGesture {
-                    // 找到当天的所有记录并回调
-                    let dailyRecords = records.filter { $0.day == day }
-                    if !dailyRecords.isEmpty {
-                        onRecordTap?(dailyRecords)
+                    .onTapGesture {
+                        // 找到当天的所有记录并回调
+                        let dailyRecords = records.filter { $0.day == day }
+                        if !dailyRecords.isEmpty {
+                            onRecordTap?(dailyRecords)
+                        }
                     }
                 }
             }
@@ -660,7 +724,6 @@ struct WalkRecordCard: View {
 }
 
 // 新增：日记模式网格
-// 新增：日记模式网格
 struct DiaryGridView: View {
     let records: [WalkRecord]
     let currentMonth: Date
@@ -668,15 +731,36 @@ struct DiaryGridView: View {
     
     let columns = Array(repeating: GridItem(.flexible()), count: 7)
     
+    // 使用固定配置的 Calendar，确保表头和偏移量计算一致
+    private var fixedCalendar: Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.firstWeekday = 1 // 周日为一周的第一天
+        calendar.locale = Locale(identifier: "zh_CN")
+        return calendar
+    }
+    
     var daysInMonth: Int {
-        Calendar.current.range(of: .day, in: .month, for: currentMonth)!.count
+        fixedCalendar.range(of: .day, in: .month, for: currentMonth)!.count
     }
     
     var firstWeekdayOffset: Int {
-        let components = Calendar.current.dateComponents([.year, .month], from: currentMonth)
-        let firstDay = Calendar.current.date(from: components)!
-        let weekday = Calendar.current.component(.weekday, from: firstDay)
+        var components = fixedCalendar.dateComponents([.year, .month], from: currentMonth)
+        components.day = 1 // 明确设置为1号
+        let firstDay = fixedCalendar.date(from: components)!
+        let weekday = fixedCalendar.component(.weekday, from: firstDay)
         return weekday - 1
+    }
+    
+    // 构建日历格子数组，避免 ForEach ID 冲突
+    var calendarCells: [CalendarCell] {
+        var cells: [CalendarCell] = []
+        for i in 0..<firstWeekdayOffset {
+            cells.append(.empty(index: i))
+        }
+        for day in 1...daysInMonth {
+            cells.append(.day(day: day))
+        }
+        return cells
     }
     
     func getRecords(for day: Int) -> [WalkRecord] {
@@ -689,43 +773,44 @@ struct DiaryGridView: View {
                 Text(day).font(.system(size: 10, weight: .bold)).foregroundColor(.appBrown.opacity(0.4))
             }
             
-            ForEach(0..<firstWeekdayOffset, id: \.self) { _ in
-                Color.clear.frame(height: 36)
-            }
-            
-            ForEach(1...daysInMonth, id: \.self) { day in
-                let dailyRecords = getRecords(for: day)
-                let hasDiary = dailyRecords.contains { $0.aiDiary != nil && !$0.aiDiary!.isEmpty }
-                
-                ZStack {
-                    if hasDiary {
-                        // 有日记
-                        // 根据日记数量决定颜色深浅：数量越多颜色越深
-                        let opacity = min(0.1 + Double(dailyRecords.count - 1) * 0.15, 0.5)
-                        Circle()
-                            .fill(Color.appBrown.opacity(opacity))
-                            .frame(height: 36)
-                        
-                        Image(systemName: "book.closed.fill")
-                            .font(.system(size: 14))
-                            .foregroundColor(.appBrown)
-                    } else if !dailyRecords.isEmpty {
-                        // 有记录但没日记
-                         Circle()
-                            .fill(Color.gray.opacity(0.1))
-                            .frame(height: 36)
-                        Image(systemName: "pawprint.fill")
-                            .font(.system(size: 12))
-                            .foregroundColor(.gray.opacity(0.5))
-                    } else {
-                        // 无记录
-                        Circle().fill(Color.gray.opacity(0.05)).frame(height: 36)
-                        Text("\(day)").font(.system(size: 10)).foregroundColor(.gray.opacity(0.5))
+            ForEach(calendarCells) { cell in
+                switch cell {
+                case .empty:
+                    Color.clear.frame(height: 36)
+                case .day(let day):
+                    let dailyRecords = getRecords(for: day)
+                    let hasDiary = dailyRecords.contains { $0.aiDiary != nil && !$0.aiDiary!.isEmpty }
+                    
+                    ZStack {
+                        if hasDiary {
+                            // 有日记
+                            // 根据日记数量决定颜色深浅：数量越多颜色越深
+                            let opacity = min(0.1 + Double(dailyRecords.count - 1) * 0.15, 0.5)
+                            Circle()
+                                .fill(Color.appBrown.opacity(opacity))
+                                .frame(height: 36)
+                            
+                            Image(systemName: "book.closed.fill")
+                                .font(.system(size: 14))
+                                .foregroundColor(.appBrown)
+                        } else if !dailyRecords.isEmpty {
+                            // 有记录但没日记
+                             Circle()
+                                .fill(Color.gray.opacity(0.1))
+                                .frame(height: 36)
+                            Image(systemName: "pawprint.fill")
+                                .font(.system(size: 12))
+                                .foregroundColor(.gray.opacity(0.5))
+                        } else {
+                            // 无记录
+                            Circle().fill(Color.gray.opacity(0.05)).frame(height: 36)
+                            Text("\(day)").font(.system(size: 10)).foregroundColor(.gray.opacity(0.5))
+                        }
                     }
-                }
-                .onTapGesture {
-                    if hasDiary {
-                        onRecordTap?(dailyRecords)
+                    .onTapGesture {
+                        if hasDiary {
+                            onRecordTap?(dailyRecords)
+                        }
                     }
                 }
             }

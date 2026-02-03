@@ -13,154 +13,136 @@ struct PetWalkLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: PetWalkAttributes.self) { context in
             // Lock Screen / Banner View
-            PetWalkLockScreenView(context: context)
-                .activityBackgroundTint(Color.black.opacity(0.8))
+            LockScreenView(state: context.state, petName: context.attributes.petName)
+                .activityBackgroundTint(Color.black.opacity(0.85))
                 .activitySystemActionForegroundColor(Color.white)
                 
         } dynamicIsland: { context in
             DynamicIsland {
                 // MARK: - Expanded UI
                 
-                // Left: Pet Animation
+                // Leading: 宠物图标
                 DynamicIslandExpandedRegion(.leading) {
-                    HStack(alignment: .center, spacing: 4) {
-                        petIcon(for: context.state)
-                            .font(.system(size: 34))
-                        
-                        // Mood Bubble
-                        if !context.state.petMood.isEmpty {
-                            Text(moodEmoji(for: context.state.petMood))
-                                .font(.caption)
-                                .offset(y: -10)
-                        }
+                    HStack(spacing: 4) {
+                        Image(systemName: "pawprint.fill")
+                            .font(.system(size: 28))
+                            .foregroundColor(.orange)
                     }
-                    .dynamicIsland(verticalPlacement: .belowIfTooWide)
                 }
                 
-                // Right: Main Stat (Distance)
+                // Trailing: 距离
                 DynamicIslandExpandedRegion(.trailing) {
-                    VStack(alignment: .trailing) {
-                        Text("\(String(format: "%.2f", context.state.distance))")
-                            .font(.system(size: 32, weight: .bold, design: .rounded))
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(String(format: "%.2f", context.state.distance))
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
                             .foregroundColor(.green)
-                        Text("km")
+                        Text("公里")
                             .font(.caption2)
                             .foregroundColor(.gray)
                     }
-                    .dynamicIsland(verticalPlacement: .belowIfTooWide)
                 }
                 
-                // Bottom: Stats Grid
+                // Center: 宠物名
+                DynamicIslandExpandedRegion(.center) {
+                    Text(context.attributes.petName)
+                        .font(.headline)
+                        .foregroundColor(.white)
+                }
+                
+                // Bottom: 时长和速度
                 DynamicIslandExpandedRegion(.bottom) {
-                    HStack(spacing: 16) {
-                        StatView(title: "Duration", value: formatDuration(context.state.duration))
+                    HStack(spacing: 20) {
+                        // 时长
+                        HStack(spacing: 4) {
+                            Image(systemName: "timer")
+                                .foregroundColor(.cyan)
+                            Text(formatDuration(context.state.duration))
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundColor(.white)
+                        }
                         
-                        Divider()
-                            .frame(height: 30)
-                        
-                        StatView(title: "Speed", value: String(format: "%.1f km/h", context.state.currentSpeed))
+                        // 速度
+                        HStack(spacing: 4) {
+                            Image(systemName: "speedometer")
+                                .foregroundColor(.yellow)
+                            Text(String(format: "%.1f km/h", context.state.currentSpeed))
+                                .font(.system(.body, design: .rounded))
+                                .foregroundColor(.white)
+                        }
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 8)
+                    .padding(.top, 4)
                 }
                 
             } compactLeading: {
-                // MARK: - Compact Leading
-                HStack(spacing: 2) {
-                    Image(systemName: context.state.isMoving ? "hare.fill" : "tortoise.fill")
-                        .foregroundColor(.brown)
-                }
-            } compactTrailing: {
-                // MARK: - Compact Trailing
-                Text("\(String(format: "%.2f", context.state.distance))km")
-                    .foregroundColor(.green)
-                    .font(.caption.bold())
-            } minimal: {
-                // MARK: - Minimal
+                // MARK: - Compact Leading: 爪印图标
                 Image(systemName: "pawprint.fill")
-                    .foregroundColor(.brown)
+                    .foregroundColor(.orange)
+            } compactTrailing: {
+                // MARK: - Compact Trailing: 距离
+                Text(String(format: "%.1f", context.state.distance))
+                    .font(.system(.body, design: .rounded).bold())
+                    .foregroundColor(.green)
+            } minimal: {
+                // MARK: - Minimal: 简单爪印
+                Image(systemName: "pawprint.fill")
+                    .foregroundColor(.orange)
             }
         }
     }
     
-    // Helper Views
-    
-    @ViewBuilder
-    func petIcon(for state: PetWalkAttributes.ContentState) -> some View {
-        if state.isMoving {
-            Image(systemName: "dog.fill")
-                .foregroundColor(.brown)
-                .symbolEffect(.bounce, options: .repeating, value: state.isMoving)
-        } else {
-            Image(systemName: "dog")
-                .foregroundColor(.gray)
-        }
-    }
-    
-    func moodEmoji(for mood: String) -> String {
-        switch mood {
-        case "happy": return "🎵"
-        case "tired": return "💦"
-        case "excited": return "✨"
-        default: return "🐶"
-        }
-    }
-    
-    func formatDuration(_ duration: TimeInterval) -> String {
+    private func formatDuration(_ duration: TimeInterval) -> String {
         let minutes = Int(duration) / 60
         let seconds = Int(duration) % 60
         return String(format: "%02d:%02d", minutes, seconds)
     }
 }
 
-struct PetWalkLockScreenView: View {
-    let context: ActivityViewContext<PetWalkAttributes>
+// MARK: - Lock Screen View
+private struct LockScreenView: View {
+    let state: PetWalkAttributes.ContentState
+    let petName: String
     
     var body: some View {
-        HStack {
-            // Pet Avatar
-            Image(systemName: context.state.isMoving ? "figure.run" : "figure.walk")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 40, height: 40)
-                .padding()
-                .background(Circle().fill(Color.orange.opacity(0.2)))
+        HStack(spacing: 12) {
+            // 左侧：宠物图标
+            ZStack {
+                Circle()
+                    .fill(Color.orange.opacity(0.3))
+                    .frame(width: 50, height: 50)
+                Image(systemName: "pawprint.fill")
+                    .font(.system(size: 24))
+                    .foregroundColor(.orange)
+            }
             
-            VStack(alignment: .leading) {
-                Text(context.attributes.petName)
+            // 中间：宠物名和状态
+            VStack(alignment: .leading, spacing: 4) {
+                Text(petName)
                     .font(.headline)
-                Text(context.state.isMoving ? "Running..." : "Paused")
+                    .foregroundColor(.white)
+                Text(state.isMoving ? "遛狗中..." : "已暂停")
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.gray)
             }
             
             Spacer()
             
-            VStack(alignment: .trailing) {
-                Text("\(String(format: "%.2f", context.state.distance)) km")
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                Text(context.state.currentSpeed > 0 ? "\(String(format: "%.1f", context.state.currentSpeed)) km/h" : "--")
+            // 右侧：距离和时长
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(String(format: "%.2f km", state.distance))
+                    .font(.system(size: 22, weight: .bold, design: .rounded))
+                    .foregroundColor(.green)
+                Text(formatDuration(state.duration))
                     .font(.caption)
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.gray)
             }
-            .padding(.trailing)
         }
-        .padding()
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
     }
-}
-
-struct StatView: View {
-    let title: String
-    let value: String
     
-    var body: some View {
-        VStack(spacing: 2) {
-            Text(title)
-                .font(.caption2)
-                .foregroundColor(.secondary)
-            Text(value)
-                .font(.system(.body, design: .rounded))
-                .fontWeight(.medium)
-        }
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return String(format: "%02d:%02d", minutes, seconds)
     }
 }
