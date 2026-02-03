@@ -243,45 +243,51 @@ class WalkSessionManager: ObservableObject {
     
     // MARK: - Live Activity Management
     
-    func terminateAllActivities() {
-        Task {
-            for activity in Activity<PetWalkAttributes>.activities {
-                print("WalkSessionManager: Terminating existing activity id=\(activity.id)")
-                await activity.end(nil, dismissalPolicy: .immediate)
-            }
+    func terminateAllActivities() async {
+        for activity in Activity<PetWalkAttributes>.activities {
+            await activity.end(nil, dismissalPolicy: .immediate)
         }
     }
 
     private func startLiveActivity() {
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
         
-        // 先清理可能残留的活动
-        terminateAllActivities()
-        
-        let attributes = PetWalkAttributes(petName: "Buddy", avatarImageName: "dog_avatar")
-        let contentState = PetWalkAttributes.ContentState(
-            distance: 0,
-            duration: 0,
-            currentSpeed: 0,
-            isMoving: false,
-            petMood: "happy"
-        )
-        
-        do {
-            let activity = try Activity.request(
-                attributes: attributes,
-                content: .init(state: contentState, staleDate: nil),
-                pushType: nil
+        Task {
+            // 先清理可能残留的活动
+            await terminateAllActivities()
+            
+            // 短暂延迟确保清理完成
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            
+            let attributes = PetWalkAttributes(petName: "Buddy", avatarImageName: "dog_avatar")
+            let contentState = PetWalkAttributes.ContentState(
+                distance: 0,
+                duration: 0,
+                currentSpeed: 0,
+                isMoving: false,
+                petMood: "happy"
             )
-            self.activity = activity
-            print("WalkSessionManager: Live Activity started id=\(activity.id)")
-        } catch {
-            print("WalkSessionManager: Error starting Live Activity: \(error)")
+            
+            do {
+                let newActivity = try Activity.request(
+                    attributes: attributes,
+                    content: ActivityContent(state: contentState, staleDate: nil),
+                    pushType: nil
+                )
+                await MainActor.run {
+                    self.activity = newActivity
+                }
+            } catch {
+                print("Error starting Live Activity: \(error)")
+            }
         }
     }
     
     private func updateLiveActivity() {
-        guard let activity = activity else { return }
+        guard let activity = activity else {
+            // 静默返回，避免日志刷屏
+            return
+        }
         
         let contentState = PetWalkAttributes.ContentState(
             distance: distance,
@@ -311,9 +317,10 @@ class WalkSessionManager: ObservableObject {
         
         Task {
             await activity.end(.init(state: finalContent, staleDate: nil), dismissalPolicy: .immediate)
-            self.activity = nil
-            // 再次确保清理其他可能的活动
-            terminateAllActivities() 
+            await MainActor.run {
+                self.activity = nil
+            }
+            await terminateAllActivities()
         }
     }
 }
